@@ -11,6 +11,7 @@ enum DelayedEventsInfo {
 enum DelayedEventsError: Error {
     case invalidUrl(String)
     case httpError(code: Int, data: Data?)
+    case invalidResponse
 }
 
 enum DelayedHosts {

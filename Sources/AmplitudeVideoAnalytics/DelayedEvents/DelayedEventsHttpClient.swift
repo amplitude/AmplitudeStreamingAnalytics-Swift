@@ -57,6 +57,7 @@ final class DelayedEventsHttpClient: DelayedEventsUploading {
                 return
             }
             guard let httpResponse = response as? HTTPURLResponse else {
+                completion(.failure(DelayedEventsError.invalidResponse))
                 return
             }
             switch httpResponse.statusCode {
