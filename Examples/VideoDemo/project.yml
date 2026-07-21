@@ -1,0 +1,35 @@
+name: VideoDemo
+options:
+  bundleIdPrefix: com.amplitude
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  AmplitudeVideo-Swift:
+    path: ../..
+targets:
+  VideoDemo:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.amplitude.VideoDemo
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: VideoDemo
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - package: AmplitudeVideo-Swift
+        product: AmplitudeVideoAnalytics
+schemes:
+  VideoDemo:
+    build:
+      targets:
+        VideoDemo: all
+    run:
+      config: Debug
+    test:
+      config: Debug
