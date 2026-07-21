@@ -1,0 +1,24 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint:
+    runs-on: macos-14-large
+    steps:
+      - name: Checkout
+        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
+      - name: Set Xcode 16
+        run: |
+          sudo xcode-select -switch /Applications/Xcode_16.1.app
+      - name: Lint
+        run: swiftlint --strict # force to fix warnings too
+      - name: DelayedEvents extraction boundary
+        run: |
+          if grep -rnE 'Video|AVPlayer' Sources/AmplitudeVideoAnalytics/DelayedEvents/; then
+            echo "DelayedEvents/ must not reference video types (extractability, design v3.1)"; exit 1
+          fi
