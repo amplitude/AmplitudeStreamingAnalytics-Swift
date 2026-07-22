@@ -25,6 +25,7 @@ enum DelayedHosts {
 /// type resumes any suspended timer before cancelling it in `deinit`.
 final class PulseTimer {
     private let timer: DispatchSourceTimer
+    private let stateLock = NSLock()
     private var isSuspended = true
 
     init(interval: TimeInterval, queue: DispatchQueue, handler: @escaping () -> Void) {
@@ -34,19 +35,32 @@ final class PulseTimer {
     }
 
     func resume() {
-        guard isSuspended else { return }
+        stateLock.lock()
+        guard isSuspended else {
+            stateLock.unlock()
+            return
+        }
         isSuspended = false
+        stateLock.unlock()
         timer.resume()
     }
 
     func suspend() {
-        guard !isSuspended else { return }
+        stateLock.lock()
+        guard !isSuspended else {
+            stateLock.unlock()
+            return
+        }
         isSuspended = true
+        stateLock.unlock()
         timer.suspend()
     }
 
     deinit {
-        if isSuspended {
+        stateLock.lock()
+        let wasSuspended = isSuspended
+        stateLock.unlock()
+        if wasSuspended {
             timer.resume()
         }
         timer.cancel()
