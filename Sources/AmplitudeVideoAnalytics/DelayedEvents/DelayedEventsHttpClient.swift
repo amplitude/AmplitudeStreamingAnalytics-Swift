@@ -31,6 +31,7 @@ final class DelayedEventsHttpClient: DelayedEventsUploading {
     func upload(_ body: DelayedRequestBody, completion: @escaping (Result<Int, Error>) -> Void) -> URLSessionDataTask? {
         let urlString = getUrl()
         guard let requestUrl = URL(string: urlString) else {
+            logger?.error(message: "Delayed events request failed: invalid URL \(urlString)")
             completion(.failure(DelayedEventsError.invalidUrl(urlString)))
             return nil
         }
@@ -44,6 +45,7 @@ final class DelayedEventsHttpClient: DelayedEventsUploading {
         do {
             data = try JSONEncoder().encode(body)
         } catch {
+            logger?.error(message: "Delayed events request failed: body encoding error \(error)")
             completion(.failure(error))
             return nil
         }
@@ -57,13 +59,17 @@ final class DelayedEventsHttpClient: DelayedEventsUploading {
                 return
             }
             guard let httpResponse = response as? HTTPURLResponse else {
+                logger?.error(message: "Delayed events request failed: non-HTTP response")
                 completion(.failure(DelayedEventsError.invalidResponse))
                 return
             }
             switch httpResponse.statusCode {
             case 1..<300:
+                logger?.debug(message: "Delayed events request succeeded: HTTP \(httpResponse.statusCode)")
                 completion(.success(httpResponse.statusCode))
             default:
+                let bodyText = responseData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                logger?.error(message: "Delayed events request failed: HTTP \(httpResponse.statusCode) \(bodyText)")
                 completion(.failure(DelayedEventsError.httpError(code: httpResponse.statusCode, data: responseData)))
             }
         }
