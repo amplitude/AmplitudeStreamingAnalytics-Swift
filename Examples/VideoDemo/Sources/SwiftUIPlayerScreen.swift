@@ -1,12 +1,21 @@
 import AmplitudeVideoAnalytics
-import AVFoundation
+import AVKit
 import SwiftUI
 
+/// Identifiable wrapper so the player can drive item-based full-screen
+/// presentation. `fullScreenCover(isPresented:)` + optional `@State` is prone
+/// to the classic stale-capture race (the cover renders once with the old nil
+/// value → blank screen); `fullScreenCover(item:)` hands the unwrapped value
+/// straight to the content closure instead.
+private struct PresentedPlayer: Identifiable {
+    let id = UUID()
+    let player: AVPlayer
+}
+
 /// SwiftUI tab: a content card with a play button that presents the demo
-/// video full-screen via `AVPlayerViewController`.
+/// video full-screen via AVKit's native SwiftUI `VideoPlayer` view.
 struct SwiftUIPlayerScreen: View {
-    @State private var player: AVPlayer?
-    @State private var isPresentingPlayer = false
+    @State private var presented: PresentedPlayer?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -38,34 +47,42 @@ struct SwiftUIPlayerScreen: View {
                 .foregroundColor(.secondary)
         }
         .padding(.top, 40)
-        .fullScreenCover(isPresented: $isPresentingPlayer, onDismiss: teardownPlayer) {
-            if let player {
-                // AVPlayerViewController is embedded here (not presented directly),
-                // so it doesn't get AVKit's automatic "Done" button. Provide an
-                // explicit close affordance instead.
-                FullScreenPlayerView(player: player)
+        .fullScreenCover(item: $presented) { presented in
+            ZStack {
+                Color.black
                     .ignoresSafeArea()
-                    .overlay(alignment: .topTrailing) {
-                        Button {
-                            isPresentingPlayer = false
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title)
-                                .foregroundStyle(.white, .black.opacity(0.6))
-                                .padding()
-                        }
-                    }
+                VideoPlayer(player: presented.player)
+                    .ignoresSafeArea()
+            }
+            // `VideoPlayer` has no dismiss affordance of its own, and
+            // `fullScreenCover` has no swipe-to-dismiss. Provide an
+            // explicit close button.
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    dismissPlayer()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title)
+                        .foregroundStyle(.white, .black.opacity(0.6))
+                        .padding()
+                }
+            }
+            .onAppear {
+                presented.player.play()
             }
         }
     }
 
     private func play() {
-        player = AVPlayer(url: DemoVideo.validURL)
-        isPresentingPlayer = true
+        let player = AVPlayer(url: DemoVideo.validURL)
+
+        // TODO(video-analytics): plugin.trackVideo(player: AVPlayerVideoPlayer(player), options: ...)
+
+        presented = PresentedPlayer(player: player)
     }
 
-    private func teardownPlayer() {
-        player?.pause()
-        player = nil
+    private func dismissPlayer() {
+        presented?.player.pause()
+        presented = nil
     }
 }

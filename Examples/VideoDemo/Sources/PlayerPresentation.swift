@@ -1,5 +1,4 @@
 import AVKit
-import SwiftUI
 
 /// Shared demo content: Apple's public HLS test stream, used by both the
 /// SwiftUI and UIKit playback screens.
@@ -13,28 +12,6 @@ enum DemoVideo {
             fatalError("DemoVideo.url failed to parse a static, hardcoded URL literal")
         }
         return url
-    }
-}
-
-/// Hosts an `AVPlayerViewController` full-screen for SwiftUI, via
-/// `UIViewControllerRepresentable`. The caller owns the `AVPlayer` instance
-/// and is responsible for tearing it down (pause + release) when the
-/// presentation is dismissed.
-struct FullScreenPlayerView: UIViewControllerRepresentable {
-    let player: AVPlayer
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
-        controller.player = player
-
-        // TODO(video-analytics): plugin.trackVideo(player: AVPlayerVideoPlayer(player), options: ...)
-
-        player.play()
-        return controller
-    }
-
-    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
-        // No dynamic updates needed for this demo screen.
     }
 }
 
