@@ -3,7 +3,7 @@ import AmplitudeSwift
 
 @testable import AmplitudeVideoAnalytics
 
-final class ScriptedPlayer: VideoPlayer {
+final class FakeVideoPlayer: VideoPlayer {
     var currentTime: TimeInterval = 0
     var duration: TimeInterval?
     var onEvent: ((VideoPlayerEvent) -> Void)?
@@ -14,7 +14,7 @@ final class ScriptedPlayer: VideoPlayer {
 
 final class VideoEventsTests: XCTestCase {
     func testStoppedSnapshotVoD() {
-        let player = ScriptedPlayer()
+        let player = FakeVideoPlayer()
         player.duration = 100
         player.currentTime = 25
         let event = VideoEvents.stoppedSnapshot(
@@ -31,7 +31,7 @@ final class VideoEventsTests: XCTestCase {
     }
 
     func testLiveOmitsDurationAndPercent() {
-        let player = ScriptedPlayer()   // duration nil
+        let player = FakeVideoPlayer()   // duration nil
         let event = VideoEvents.stoppedSnapshot(
             options: VideoTrackingOptions(contentId: "live-1"),
             player: player, viewSessionId: "vs-1", watchDuration: 5,
@@ -43,7 +43,7 @@ final class VideoEventsTests: XCTestCase {
     }
 
     func testStartedCarriesStartPosition() {
-        let player = ScriptedPlayer()
+        let player = FakeVideoPlayer()
         player.duration = 100
         let event = VideoEvents.started(
             options: VideoTrackingOptions(contentId: "ep-1", contentType: .vod),
