@@ -1,6 +1,6 @@
 import Foundation
 
-#if canImport(UIKit) && !os(watchOS)
+#if (os(iOS) || os(tvOS) || os(visionOS) || targetEnvironment(macCatalyst)) && !AMPLITUDE_DISABLE_UIKIT
 import UIKit
 #endif
 
@@ -57,7 +57,7 @@ final class PulseTimer {
 /// when the app is backgrounded. No-op on platforms without UIKit (e.g. macOS).
 enum BackgroundTaskRunner {
     static func begin() -> (() -> Void)? {
-        #if canImport(UIKit) && !os(watchOS)
+        #if (os(iOS) || os(tvOS) || os(visionOS) || targetEnvironment(macCatalyst)) && !AMPLITUDE_DISABLE_UIKIT
         let application = UIApplication.shared
         var identifier: UIBackgroundTaskIdentifier = .invalid
         let end = { () in
