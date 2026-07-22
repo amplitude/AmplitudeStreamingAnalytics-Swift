@@ -7,10 +7,5 @@ comments for where it will attach.
 
 ## Run
 
-```sh
-cd Examples/VideoDemo
-xcodegen generate
-open VideoDemo.xcodeproj
-```
-
-Select the `VideoDemo` scheme and run on any iOS 16+ simulator or device.
+Open `Examples/VideoDemo/VideoDemo.xcodeproj` in Xcode, select the `VideoDemo`
+scheme, and run on any iOS 16+ simulator or device.
