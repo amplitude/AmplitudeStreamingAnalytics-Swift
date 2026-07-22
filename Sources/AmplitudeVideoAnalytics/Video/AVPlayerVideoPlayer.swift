@@ -56,6 +56,12 @@ public final class AVPlayerVideoPlayer: VideoPlayer {
             self?.handleTimeControlStatusChange(player.timeControlStatus)
         }
 
+        // Item-level KVO and notifications are only registered when there's a current item at
+        // startObserving() time, and always scoped to that specific item (never `object: nil`,
+        // which would observe every AVPlayerItem in the process and cause cross-talk with
+        // unrelated players elsewhere in the host app). This mirrors the documented v1
+        // currentItem-swap assumption above: all item-level observation attaches to the item
+        // present at startObserving() time, or not at all.
         if let item = player.currentItem {
             itemStatusToken = item.observe(\.status, options: [.new]) { [weak self] item, _ in
                 self?.handleItemStatusChange(item)
@@ -63,28 +69,22 @@ public final class AVPlayerVideoPlayer: VideoPlayer {
             itemLikelyToKeepUpToken = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
                 self?.handleLikelyToKeepUpChange(item.isPlaybackLikelyToKeepUp)
             }
-        }
 
-        // Scoped to `player.currentItem` (nil-safe: if there's no item yet, `object: nil` falls
-        // back to observing all items, matching the "item set before startObserving()" v1
-        // assumption above) so this instance doesn't react to unrelated players/items elsewhere
-        // in the process.
-        let observedItem = player.currentItem
+            didPlayToEndObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime,
+                object: item,
+                queue: nil
+            ) { [weak self] _ in
+                self?.onEvent?(.ended)
+            }
 
-        didPlayToEndObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: observedItem,
-            queue: nil
-        ) { [weak self] _ in
-            self?.onEvent?(.ended)
-        }
-
-        timeJumpedObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemTimeJumped,
-            object: observedItem,
-            queue: nil
-        ) { [weak self] _ in
-            self?.onEvent?(.seeking)
+            timeJumpedObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemTimeJumped,
+                object: item,
+                queue: nil
+            ) { [weak self] _ in
+                self?.onEvent?(.seeking)
+            }
         }
     }
 
