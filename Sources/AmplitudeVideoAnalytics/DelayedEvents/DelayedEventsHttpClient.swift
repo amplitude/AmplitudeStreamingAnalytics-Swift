@@ -14,10 +14,10 @@ final class DelayedEventsHttpClient: DelayedEventsUploading {
     init(configuration: Configuration) {
         self.configuration = configuration
         self.logger = configuration.loggerProvider
-        let sessionConfiguration = URLSessionConfiguration.default
-        sessionConfiguration.httpMaximumConnectionsPerHost = 2
-        sessionConfiguration.urlCache = nil
-        self.session = URLSession(configuration: sessionConfiguration)
+        // `.ephemeral` = no persistent cache/cookies/credential storage, which is what
+        // event uploads want. Matches the house idiom in AmplitudeCore (Diagnostics,
+        // RemoteConfig) and session-replay-ios (UploadClient).
+        self.session = URLSession(configuration: .ephemeral)
     }
 
     func getUrl() -> String {
