@@ -2,20 +2,30 @@ import AmplitudeVideoAnalytics
 import AVKit
 import SwiftUI
 
-/// Identifiable wrapper so the player can drive item-based full-screen
-/// presentation. `fullScreenCover(isPresented:)` + optional `@State` is prone
-/// to the classic stale-capture race (the cover renders once with the old nil
-/// value → blank screen); `fullScreenCover(item:)` hands the unwrapped value
-/// straight to the content closure instead.
-private struct PresentedPlayer: Identifiable {
-    let id = UUID()
+/// Embeds an `AVPlayerViewController` inline and lets AVKit own the
+/// full-screen experience: `entersFullScreenWhenPlaybackBegins` takes the
+/// player full screen (with native controls and a Done button) as soon as
+/// playback starts, and exits again when playback ends.
+private struct InlinePlayerView: UIViewControllerRepresentable {
     let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.entersFullScreenWhenPlaybackBegins = true
+        controller.exitsFullScreenWhenPlaybackEnds = true
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
+        // No dynamic updates needed for this demo screen.
+    }
 }
 
-/// SwiftUI tab: a content card with a play button that presents the demo
-/// video full-screen via AVKit's native SwiftUI `VideoPlayer` view.
+/// SwiftUI tab: an inline video card whose native play control hands the
+/// player to AVKit for full-screen playback.
 struct SwiftUIPlayerScreen: View {
-    @State private var presented: PresentedPlayer?
+    @State private var player: AVPlayer?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -23,7 +33,7 @@ struct SwiftUIPlayerScreen: View {
                 Text("SwiftUI Player")
                     .font(.title2)
                     .bold()
-                Text("Plays Apple's public HLS demo stream full-screen.")
+                Text("Native AVKit player — its own controls handle play and full screen.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -33,12 +43,12 @@ struct SwiftUIPlayerScreen: View {
             .cornerRadius(12)
             .padding(.horizontal)
 
-            Button {
-                play()
-            } label: {
-                Label("Play", systemImage: "play.fill")
+            if let player {
+                InlinePlayerView(player: player)
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .cornerRadius(12)
+                    .padding(.horizontal)
             }
-            .buttonStyle(.borderedProminent)
 
             Spacer()
 
@@ -47,42 +57,16 @@ struct SwiftUIPlayerScreen: View {
                 .foregroundColor(.secondary)
         }
         .padding(.top, 40)
-        .fullScreenCover(item: $presented) { presented in
-            ZStack {
-                Color.black
-                    .ignoresSafeArea()
-                VideoPlayer(player: presented.player)
-                    .ignoresSafeArea()
-            }
-            // `VideoPlayer` has no dismiss affordance of its own, and
-            // `fullScreenCover` has no swipe-to-dismiss. Provide an
-            // explicit close button.
-            .overlay(alignment: .topTrailing) {
-                Button {
-                    dismissPlayer()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title)
-                        .foregroundStyle(.white, .black.opacity(0.6))
-                        .padding()
-                }
-            }
-            .onAppear {
-                presented.player.play()
-            }
+        .onAppear {
+            guard player == nil else { return }
+            let player = AVPlayer(url: DemoVideo.validURL)
+
+            // TODO(video-analytics): plugin.trackVideo(player: AVPlayerVideoPlayer(player), options: ...)
+
+            self.player = player
         }
-    }
-
-    private func play() {
-        let player = AVPlayer(url: DemoVideo.validURL)
-
-        // TODO(video-analytics): plugin.trackVideo(player: AVPlayerVideoPlayer(player), options: ...)
-
-        presented = PresentedPlayer(player: player)
-    }
-
-    private func dismissPlayer() {
-        presented?.player.pause()
-        presented = nil
+        .onDisappear {
+            player?.pause()
+        }
     }
 }
