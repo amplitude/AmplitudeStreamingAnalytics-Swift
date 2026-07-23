@@ -1,0 +1,235 @@
+import AVFoundation
+import CoreVideo
+import Foundation
+import XCTest
+
+@testable import AmplitudeVideoAnalytics
+
+// Scope: unlike `AVPlayerVideoPlayerTests` (bare AVPlayer, no item — pure lifecycle/teardown
+// safety), this class drives a REAL `AVPlayer` against a REAL, locally-generated (no network, no
+// HLS) H.264 asset to prove the adapter actually emits `VideoPlayerEvent`s end-to-end.
+//
+// These tests run BLOCKING in the normal suite (no quarantine/gating), so determinism outranks
+// coverage: every assertion is driven by an `XCTestExpectation` with a generous timeout and real
+// AVFoundation callbacks/KVO — never `Thread.sleep`-based sequencing of assertions. (The one
+// `Thread.sleep` in this file is a tight readiness poll inside asset *generation*, in `setUp`,
+// not part of any assertion timing.)
+//
+// `.buffering` / `.bufferingEnded` are intentionally NOT covered here: reproducing a genuine
+// playback stall deterministically needs either network throttling or a custom
+// `AVAssetResourceLoaderDelegate` that artificially delays data delivery — both are inherently
+// flaky, which is unacceptable for a blocking suite. Buffering is verified manually via the demo
+// app (Task 9b) instead.
+final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
+    /// 10 frames @ 10fps = 1.0s. Matches the asset generated in `makeSilentVideoAsset()`.
+    private static let assetDurationSeconds = 1.0
+
+    private var assetURL: URL!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        assetURL = try Self.makeSilentVideoAsset()
+    }
+
+    override func tearDownWithError() throws {
+        if let assetURL {
+            try? FileManager.default.removeItem(at: assetURL)
+        }
+        assetURL = nil
+        try super.tearDownWithError()
+    }
+
+    // MARK: - Tests
+
+    func testDurationReflectsAssetAndCurrentTimeAdvancesDuringPlayback() {
+        let player = AVPlayer(url: assetURL)
+        let sut = AVPlayerVideoPlayer(player)
+        sut.startObserving()
+        addTeardownBlock { sut.stopObserving() }
+
+        waitForItemReady(player)
+
+        guard let duration = sut.duration else {
+            return XCTFail("Expected a non-nil duration for a finite local asset")
+        }
+        XCTAssertEqual(duration, Self.assetDurationSeconds, accuracy: 0.3)
+
+        let advanced = expectation(description: "currentTime advances during playback")
+        var timeObserverToken: Any?
+        timeObserverToken = player.addPeriodicTimeObserver(
+            forInterval: CMTime(value: 1, timescale: 30),
+            queue: .main
+        ) { time in
+            if time.seconds > 0 {
+                advanced.fulfill()
+            }
+        }
+        player.play()
+        wait(for: [advanced], timeout: 10)
+        if let timeObserverToken {
+            player.removeTimeObserver(timeObserverToken)
+        }
+        player.pause()
+
+        XCTAssertGreaterThan(sut.currentTime, 0)
+    }
+
+    func testPlayedEventFiresOnPlay() {
+        let player = AVPlayer(url: assetURL)
+        let sut = AVPlayerVideoPlayer(player)
+        let played = expectation(description: "played")
+        sut.onEvent = { if $0 == .played { played.fulfill() } }
+        sut.startObserving()
+        addTeardownBlock { sut.stopObserving() }
+
+        player.play()
+        wait(for: [played], timeout: 10)
+    }
+
+    func testPausedEventFiresOnPause() {
+        let player = AVPlayer(url: assetURL)
+        let sut = AVPlayerVideoPlayer(player)
+        let played = expectation(description: "played")
+        let paused = expectation(description: "paused")
+        sut.onEvent = { event in
+            if event == .played { played.fulfill() }
+            if event == .paused { paused.fulfill() }
+        }
+        sut.startObserving()
+        addTeardownBlock { sut.stopObserving() }
+
+        player.play()
+        wait(for: [played], timeout: 10)
+        player.pause()
+        wait(for: [paused], timeout: 10)
+    }
+
+    func testSeekingEventFiresOnSeek() {
+        let player = AVPlayer(url: assetURL)
+        let sut = AVPlayerVideoPlayer(player)
+        sut.startObserving()
+        addTeardownBlock { sut.stopObserving() }
+
+        waitForItemReady(player)
+
+        let seeking = expectation(description: "seeking")
+        sut.onEvent = { if $0 == .seeking { seeking.fulfill() } }
+
+        let seekCompleted = expectation(description: "seek completed")
+        player.seek(to: CMTime(value: 5, timescale: 10)) { _ in seekCompleted.fulfill() }
+
+        wait(for: [seeking, seekCompleted], timeout: 10)
+    }
+
+    func testEndedEventFiresWhenPlaybackCompletes() {
+        let player = AVPlayer(url: assetURL)
+        let sut = AVPlayerVideoPlayer(player)
+        let ended = expectation(description: "ended")
+        sut.onEvent = { if $0 == .ended { ended.fulfill() } }
+        sut.startObserving()
+        addTeardownBlock { sut.stopObserving() }
+
+        player.play()
+        wait(for: [ended], timeout: 15)
+    }
+
+    func testErrorEventFiresForInvalidAsset() {
+        let invalidURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("does-not-exist-\(UUID().uuidString).mp4")
+        let player = AVPlayer(url: invalidURL)
+        let sut = AVPlayerVideoPlayer(player)
+        let errored = expectation(description: "error")
+        sut.onEvent = { if case .error = $0 { errored.fulfill() } }
+        sut.startObserving()
+        addTeardownBlock { sut.stopObserving() }
+
+        wait(for: [errored], timeout: 10)
+    }
+
+    // MARK: - Helpers
+
+    private func waitForItemReady(_ player: AVPlayer) {
+        guard let item = player.currentItem else {
+            return XCTFail("Expected a current item")
+        }
+        if item.status == .readyToPlay { return }
+
+        let ready = expectation(description: "item ready")
+        let token = item.observe(\.status, options: [.new]) { item, _ in
+            if item.status == .readyToPlay {
+                ready.fulfill()
+            }
+        }
+        wait(for: [ready], timeout: 10)
+        token.invalidate()
+    }
+
+    /// Generates a tiny (~1s, 16x16, H.264) silent local video file for deterministic, no-network
+    /// playback in these tests. Runs synchronously in `setUp` via `AVAssetWriter`.
+    private static func makeSilentVideoAsset() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+
+        let width = 16
+        let height = 16
+        let outputSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height
+        ]
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: outputSettings)
+        input.expectsMediaDataInRealTime = false
+
+        let sourcePixelBufferAttributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+            kCVPixelBufferWidthKey as String: width,
+            kCVPixelBufferHeightKey as String: height
+        ]
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: sourcePixelBufferAttributes
+        )
+        writer.add(input)
+        writer.startWriting()
+        writer.startSession(atSourceTime: .zero)
+
+        let frameCount = 10
+        let frameRate: Int32 = 10 // 10 frames @ 10fps == assetDurationSeconds (1.0s)
+        for frameNumber in 0..<frameCount {
+            while !input.isReadyForMoreMediaData {
+                Thread.sleep(forTimeInterval: 0.005) // tight readiness poll, not assertion timing
+            }
+            guard let pool = adaptor.pixelBufferPool else {
+                throw IntegrationTestAssetError.noPixelBufferPool
+            }
+            var pixelBufferOut: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBufferOut)
+            guard let pixelBuffer = pixelBufferOut else {
+                throw IntegrationTestAssetError.noPixelBuffer
+            }
+            CVPixelBufferLockBaseAddress(pixelBuffer, [])
+            if let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) {
+                memset(baseAddress, 0, CVPixelBufferGetDataSize(pixelBuffer))
+            }
+            CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+            let presentationTime = CMTime(value: Int64(frameNumber), timescale: frameRate)
+            adaptor.append(pixelBuffer, withPresentationTime: presentationTime)
+        }
+
+        input.markAsFinished()
+        let finished = DispatchSemaphore(value: 0)
+        writer.finishWriting { finished.signal() }
+        finished.wait()
+
+        guard writer.status == .completed else {
+            throw writer.error ?? IntegrationTestAssetError.writeFailed
+        }
+        return url
+    }
+}
+
+private enum IntegrationTestAssetError: Error {
+    case noPixelBufferPool
+    case noPixelBuffer
+    case writeFailed
+}
