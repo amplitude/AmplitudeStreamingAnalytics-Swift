@@ -3,7 +3,8 @@ import Foundation
 
 protocol DelayedEventsUploading: AnyObject {
     @discardableResult
-    func upload(_ body: DelayedRequestBody, completion: @escaping (Result<Int, Error>) -> Void) -> URLSessionDataTask?
+    func upload(_ body: DelayedRequestBody,
+                completion: @escaping (Result<DelayedResponseBody, Error>) -> Void) -> URLSessionDataTask?
 }
 
 final class DelayedEventsHttpClient: DelayedEventsUploading {
@@ -11,13 +12,15 @@ final class DelayedEventsHttpClient: DelayedEventsUploading {
     private let session: URLSession
     private let logger: (any Logger)?
 
-    init(configuration: Configuration) {
+    init(configuration: Configuration,
+         urlSessionConfiguration: URLSessionConfiguration = .ephemeral) {
         self.configuration = configuration
         self.logger = configuration.loggerProvider
         // `.ephemeral` = no persistent cache/cookies/credential storage, which is what
-        // event uploads want. Matches the house idiom in AmplitudeCore (Diagnostics,
-        // RemoteConfig) and session-replay-ios (UploadClient).
-        self.session = URLSession(configuration: .ephemeral)
+        // event uploads want (matches AmplitudeCore's Diagnostics/RemoteConfig and
+        // session-replay-ios's UploadClient). Injectable so tests can supply a
+        // URLProtocol-backed configuration.
+        self.session = URLSession(configuration: urlSessionConfiguration)
     }
 
     func getUrl() -> String {
@@ -28,10 +31,11 @@ final class DelayedEventsHttpClient: DelayedEventsUploading {
     }
 
     @discardableResult
-    func upload(_ body: DelayedRequestBody, completion: @escaping (Result<Int, Error>) -> Void) -> URLSessionDataTask? {
+    func upload(_ body: DelayedRequestBody,
+                completion: @escaping (Result<DelayedResponseBody, Error>) -> Void) -> URLSessionDataTask? {
         let urlString = getUrl()
         guard let requestUrl = URL(string: urlString) else {
-            logger?.error(message: "Delayed events request failed: invalid URL \(urlString)")
+            logger?.error(message: "Delayed events request failed: id=\(body.id) invalid URL \(urlString)")
             completion(.failure(DelayedEventsError.invalidUrl(urlString)))
             return nil
         }
@@ -45,31 +49,37 @@ final class DelayedEventsHttpClient: DelayedEventsUploading {
         do {
             data = try JSONEncoder().encode(body)
         } catch {
-            logger?.error(message: "Delayed events request failed: body encoding error \(error)")
+            logger?.error(message: "Delayed events request failed: id=\(body.id) body encoding error \(error)")
             completion(.failure(error))
             return nil
         }
 
         let endBackgroundTask = BackgroundTaskRunner.begin()
-        let task = session.uploadTask(with: request, from: data) { [logger] responseData, response, error in
+        let task = session.uploadTask(with: request, from: data) { [logger, id = body.id] responseData, response, error in
             defer { endBackgroundTask?() }
             if let error {
-                logger?.error(message: "Delayed events request failed: \(error.localizedDescription)")
+                logger?.error(message: "Delayed events request failed: id=\(id) \(error.localizedDescription)")
                 completion(.failure(error))
                 return
             }
             guard let httpResponse = response as? HTTPURLResponse else {
-                logger?.error(message: "Delayed events request failed: non-HTTP response")
+                logger?.error(message: "Delayed events request failed: id=\(id) non-HTTP response")
                 completion(.failure(DelayedEventsError.invalidResponse))
                 return
             }
             switch httpResponse.statusCode {
             case 1..<300:
-                logger?.debug(message: "Delayed events request succeeded: HTTP \(httpResponse.statusCode)")
-                completion(.success(httpResponse.statusCode))
+                do {
+                    let decoded = try JSONDecoder().decode(DelayedResponseBody.self, from: responseData ?? Data())
+                    logger?.debug(message: "Delayed events request succeeded: id=\(id) HTTP \(httpResponse.statusCode)")
+                    completion(.success(decoded))
+                } catch {
+                    logger?.error(message: "Delayed events request failed: id=\(id) HTTP \(httpResponse.statusCode) response decode error \(error)")
+                    completion(.failure(error))
+                }
             default:
                 let bodyText = responseData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                logger?.error(message: "Delayed events request failed: HTTP \(httpResponse.statusCode) \(bodyText)")
+                logger?.error(message: "Delayed events request failed: id=\(id) HTTP \(httpResponse.statusCode) \(bodyText)")
                 completion(.failure(DelayedEventsError.httpError(code: httpResponse.statusCode, data: responseData)))
             }
         }
