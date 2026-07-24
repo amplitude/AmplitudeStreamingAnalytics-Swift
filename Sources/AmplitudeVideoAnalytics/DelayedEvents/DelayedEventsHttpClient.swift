@@ -16,10 +16,7 @@ final class DelayedEventsHttpClient: DelayedEventsUploading {
          urlSessionConfiguration: URLSessionConfiguration = .ephemeral) {
         self.configuration = configuration
         self.logger = configuration.loggerProvider
-        // `.ephemeral` = no persistent cache/cookies/credential storage, which is what
-        // event uploads want (matches AmplitudeCore's Diagnostics/RemoteConfig and
-        // session-replay-ios's UploadClient). Injectable so tests can supply a
-        // URLProtocol-backed configuration.
+        // `.ephemeral`: no persistent cache/cookies/credentials; injectable for tests.
         self.session = URLSession(configuration: urlSessionConfiguration)
     }
 
