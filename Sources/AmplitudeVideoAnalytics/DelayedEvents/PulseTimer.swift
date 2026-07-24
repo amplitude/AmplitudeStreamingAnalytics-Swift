@@ -2,6 +2,9 @@ import Foundation
 
 /// Thin wrapper around `DispatchSourceTimer` that tracks suspend/resume state.
 ///
+/// Starts suspended: `resume()` to start ticking, `suspend()` to pause, release
+/// to stop for good. Both are idempotent and safe to call from any thread.
+///
 /// `DispatchSourceTimer` crashes if it is deallocated while suspended, so this
 /// type resumes any suspended timer before cancelling it in `deinit`.
 final class PulseTimer {
