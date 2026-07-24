@@ -15,25 +15,26 @@ final class PulseTimer {
         timer.setEventHandler(handler: handler)
     }
 
+    // The lock is held across the `timer` call, not just the flag mutation, so
+    // the flag and the underlying suspend/resume stay atomic as a unit.
+    // Releasing early would let a concurrent resume/suspend reorder the actual
+    // dispatch calls relative to the flag, breaking the suspend/resume balance
+    // (`DispatchSourceTimer` crashes on over-resume and cannot be deallocated
+    // while suspended). `resume`/`suspend` do not synchronously re-enter this
+    // type, so holding the lock across them cannot deadlock.
     func resume() {
         stateLock.lock()
-        guard isSuspended else {
-            stateLock.unlock()
-            return
-        }
+        defer { stateLock.unlock() }
+        guard isSuspended else { return }
         isSuspended = false
-        stateLock.unlock()
         timer.resume()
     }
 
     func suspend() {
         stateLock.lock()
-        guard !isSuspended else {
-            stateLock.unlock()
-            return
-        }
+        defer { stateLock.unlock() }
+        guard !isSuspended else { return }
         isSuspended = true
-        stateLock.unlock()
         timer.suspend()
     }
 
