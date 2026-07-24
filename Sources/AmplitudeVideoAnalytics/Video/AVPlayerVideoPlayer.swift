@@ -7,10 +7,21 @@ import Foundation
 /// v1 assumption: `currentItem` is expected to be set (or left nil for the lifetime of this
 /// instance) before `startObserving()` is called. Item-level observers are attached once, against
 /// whatever `player.currentItem` is at `startObserving()` time; if the caller swaps
-/// `player.replaceCurrentItem(with:)` afterwards, item-level KVO (`status`,
-/// `isPlaybackLikelyToKeepUp`) will keep observing the original item, not the new one. This is the
-/// simpler of the two options in the brief; re-attaching on every item swap would require KVO on
-/// `player.currentItem` itself and was judged unnecessary complexity for v1.
+/// `player.replaceCurrentItem(with:)` afterwards, item-scoped observation (`.ended`, `.seeking`,
+/// `.error`, `.bufferingEnded`) will keep referring to the original item, not the new one.
+///
+/// In v1 the caller must therefore explicitly reconnect video tracking around an item swap:
+///
+/// ```swift
+/// adapter.stopObserving()
+/// player.replaceCurrentItem(with: newItem)
+/// adapter.startObserving() // re-attaches item-level observation to the new item
+/// ```
+///
+/// `AVQueuePlayer` advances `currentItem` internally with no hook for this recipe and is not
+/// supported in v1. Automatic re-attachment (KVO on `player.currentItem`) is deferred to v2,
+/// where an item swap must also surface to the tracking layer as a content change (new view
+/// session with fresh caller-supplied metadata).
 public final class AVPlayerVideoPlayer: VideoPlayer {
     private let player: AVPlayer
     private var isObserving = false
