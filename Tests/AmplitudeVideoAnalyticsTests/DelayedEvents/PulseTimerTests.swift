@@ -8,16 +8,14 @@ final class PulseTimerFireCounter {
     private var count = 0
 
     func increment() -> Int {
-        lock.lock()
-        defer { lock.unlock() }
-        count += 1
-        return count
+        lock.withLock {
+            count += 1
+            return count
+        }
     }
 
     func read() -> Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return count
+        lock.withLock { count }
     }
 }
 

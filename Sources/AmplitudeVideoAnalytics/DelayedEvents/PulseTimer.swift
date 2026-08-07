@@ -26,25 +26,23 @@ final class PulseTimer {
     // while suspended). `resume`/`suspend` do not synchronously re-enter this
     // type, so holding the lock across them cannot deadlock.
     func resume() {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        guard isSuspended else { return }
-        isSuspended = false
-        timer.resume()
+        stateLock.withLock {
+            guard isSuspended else { return }
+            isSuspended = false
+            timer.resume()
+        }
     }
 
     func suspend() {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        guard !isSuspended else { return }
-        isSuspended = true
-        timer.suspend()
+        stateLock.withLock {
+            guard !isSuspended else { return }
+            isSuspended = true
+            timer.suspend()
+        }
     }
 
     deinit {
-        stateLock.lock()
-        let wasSuspended = isSuspended
-        stateLock.unlock()
+        let wasSuspended = stateLock.withLock { isSuspended }
         if wasSuspended {
             timer.resume()
         }
