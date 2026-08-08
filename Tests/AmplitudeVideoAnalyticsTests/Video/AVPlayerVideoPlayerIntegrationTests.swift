@@ -146,16 +146,64 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
         wait(for: [errored], timeout: 10)
     }
 
+    /// Regression: `.new`-only KVO never fires for an item that reached its terminal `.failed`
+    /// state before `startObserving()`, so the error — and the whole view session — was silently
+    /// dropped. Observation begins only after the failure has already landed.
+    func testErrorEventFiresWhenItemAlreadyFailedBeforeObserving() {
+        let invalidURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("does-not-exist-\(UUID().uuidString).mp4")
+        let player = AVPlayer(url: invalidURL)
+
+        let failed = expectation(description: "item reached .failed")
+        let statusToken = player.currentItem?.observe(\.status, options: [.initial, .new]) { item, _ in
+            if item.status == .failed { failed.fulfill() }
+        }
+        wait(for: [failed], timeout: 10)
+        statusToken?.invalidate()
+
+        let sut = AVPlayerVideoPlayer(player)
+        let errored = expectation(description: "error")
+        sut.onEvent = { if case .error = $0 { errored.fulfill() } }
+        sut.startObserving()
+        addTeardownBlock { sut.stopObserving() }
+
+        wait(for: [errored], timeout: 10)
+    }
+
+    /// Regression: a player already `.playing` when observation starts emitted no `.played`, so no
+    /// view session was ever opened for it.
+    func testPlayedEventFiresWhenPlayerAlreadyPlayingBeforeObserving() {
+        let player = AVPlayer(url: assetURL)
+        waitForItemReady(player)
+
+        let playing = expectation(description: "player reached .playing")
+        let statusToken = player.observe(\.timeControlStatus, options: [.initial, .new]) { player, _ in
+            if player.timeControlStatus == .playing { playing.fulfill() }
+        }
+        player.play()
+        wait(for: [playing], timeout: 10)
+        statusToken.invalidate()
+
+        let sut = AVPlayerVideoPlayer(player)
+        let played = expectation(description: "played")
+        sut.onEvent = { if $0 == .played { played.fulfill() } }
+        sut.startObserving()
+        addTeardownBlock { sut.stopObserving() }
+
+        wait(for: [played], timeout: 10)
+    }
+
     // MARK: - Helpers
 
     private func waitForItemReady(_ player: AVPlayer) {
         guard let item = player.currentItem else {
             return XCTFail("Expected a current item")
         }
-        if item.status == .readyToPlay { return }
-
         let ready = expectation(description: "item ready")
-        let token = item.observe(\.status, options: [.new]) { item, _ in
+        // `.initial` rather than a `status` read before registering: the item can become ready in
+        // the window between the two, and `.readyToPlay` has no later transition to observe, so
+        // the check-then-register form waits out the full timeout on an already-ready item.
+        let token = item.observe(\.status, options: [.initial, .new]) { item, _ in
             if item.status == .readyToPlay {
                 ready.fulfill()
             }
@@ -190,13 +238,24 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
             sourcePixelBufferAttributes: sourcePixelBufferAttributes
         )
         writer.add(input)
-        writer.startWriting()
+        guard writer.startWriting() else {
+            throw writer.error ?? IntegrationTestAssetError.writeFailed
+        }
         writer.startSession(atSourceTime: .zero)
 
         let frameCount = 10
         let frameRate: Int32 = 10 // 10 frames @ 10fps == assetDurationSeconds (1.0s)
         for frameNumber in 0..<frameCount {
+            // Bounded: an unbounded poll would spin forever if the writer fails, and this runs in
+            // setUp rather than under an XCTest expectation, so nothing else would ever time it out.
+            let readyDeadline = Date().addingTimeInterval(assetWriteTimeout)
             while !input.isReadyForMoreMediaData {
+                guard writer.status == .writing else {
+                    throw writer.error ?? IntegrationTestAssetError.writeFailed
+                }
+                guard Date() < readyDeadline else {
+                    throw IntegrationTestAssetError.writerInputNeverReady
+                }
                 Thread.sleep(forTimeInterval: 0.005) // tight readiness poll, not assertion timing
             }
             guard let pool = adaptor.pixelBufferPool else {
@@ -228,8 +287,12 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
     }
 }
 
+/// Upper bound on how long `makeSilentVideoAsset()` waits for the writer input to accept data.
+private let assetWriteTimeout: TimeInterval = 30
+
 private enum IntegrationTestAssetError: Error {
     case noPixelBufferPool
     case noPixelBuffer
     case writeFailed
+    case writerInputNeverReady
 }

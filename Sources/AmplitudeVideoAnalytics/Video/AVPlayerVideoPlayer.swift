@@ -106,6 +106,30 @@ final class AVPlayerVideoPlayer: VideoPlayer {
                 self?.onEvent?(.seeking)
             }
         }
+
+        emitCurrentState()
+    }
+
+    /// Replays state that `.new`-only KVO cannot deliver, because it predates `startObserving()`.
+    ///
+    /// KVO fires on *transitions*, but both observed properties can already hold their significant
+    /// value when observation begins: `AVPlayerItem.status` is monotonic with `.failed` terminal,
+    /// so an item that failed before tracking started would never emit `.error` (and, never having
+    /// played, would produce no view session at all — a failed playback would be invisible rather
+    /// than reported); likewise a player already playing would never emit `.played`.
+    ///
+    /// Deliberately an explicit call at the end of `startObserving()` rather than KVO's `.initial`
+    /// option: `.initial` fires the block part-way through registration, and on `timeControlStatus`
+    /// it would also emit a spurious `.paused` for any freshly-created player. Consumers may
+    /// therefore receive an event synchronously, before `startObserving()` returns.
+    private func emitCurrentState() {
+        if let item = player.currentItem, item.status == .failed {
+            onEvent?(.error(message: item.error?.localizedDescription))
+            return
+        }
+        if player.timeControlStatus == .playing {
+            onEvent?(.played)
+        }
     }
 
     func stopObserving() {
