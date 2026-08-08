@@ -278,7 +278,13 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
         input.markAsFinished()
         let finished = DispatchSemaphore(value: 0)
         writer.finishWriting { finished.signal() }
-        finished.wait()
+        // Bounded for the same reason as the readiness poll above: this runs in setUp, outside any
+        // XCTest expectation, so an encoder that never invokes the completion handler would hang
+        // the whole suite rather than fail it.
+        guard finished.wait(timeout: .now() + assetWriteTimeout) == .success else {
+            writer.cancelWriting()
+            throw IntegrationTestAssetError.writerDidNotFinish
+        }
 
         guard writer.status == .completed else {
             throw writer.error ?? IntegrationTestAssetError.writeFailed
@@ -287,7 +293,8 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
     }
 }
 
-/// Upper bound on how long `makeSilentVideoAsset()` waits for the writer input to accept data.
+/// Upper bound on how long `makeSilentVideoAsset()` waits on the writer — both for the input to
+/// accept data and for `finishWriting` to call back.
 private let assetWriteTimeout: TimeInterval = 30
 
 private enum IntegrationTestAssetError: Error {
@@ -295,4 +302,5 @@ private enum IntegrationTestAssetError: Error {
     case noPixelBuffer
     case writeFailed
     case writerInputNeverReady
+    case writerDidNotFinish
 }
