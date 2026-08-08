@@ -24,19 +24,27 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
     /// 10 frames @ 10fps = 1.0s. Matches the asset generated in `makeSilentVideoAsset()`.
     private static let assetDurationSeconds = 1.0
 
+    /// Generated once for the whole class, not per test: H.264 encoding is software-only and slow
+    /// on the simulators CI runs, and every test only ever reads the file. Regenerating it in each
+    /// `setUp` multiplied both the runtime and the exposure to encoder stalls by the test count.
+    private static var sharedAssetURL: URL?
+
     private var assetURL: URL!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        assetURL = try Self.makeSilentVideoAsset()
+        if Self.sharedAssetURL == nil {
+            Self.sharedAssetURL = try Self.makeSilentVideoAsset()
+        }
+        assetURL = Self.sharedAssetURL
     }
 
-    override func tearDownWithError() throws {
-        if let assetURL {
-            try? FileManager.default.removeItem(at: assetURL)
+    override static func tearDown() {
+        if let sharedAssetURL {
+            try? FileManager.default.removeItem(at: sharedAssetURL)
         }
-        assetURL = nil
-        try super.tearDownWithError()
+        sharedAssetURL = nil
+        super.tearDown()
     }
 
     // MARK: - Tests
@@ -295,7 +303,11 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
 
 /// Upper bound on how long `makeSilentVideoAsset()` waits on the writer — both for the input to
 /// accept data and for `finishWriting` to call back.
-private let assetWriteTimeout: TimeInterval = 30
+///
+/// Generous on purpose. This exists to convert a hang into a failure, not to assert performance:
+/// the software H.264 encoder on a loaded CI simulator has been seen to stall a single frame for
+/// well over 30s. Tightening this trades a real hang guard for flaky failures.
+private let assetWriteTimeout: TimeInterval = 180
 
 private enum IntegrationTestAssetError: Error {
     case noPixelBufferPool
