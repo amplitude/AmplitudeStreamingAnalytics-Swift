@@ -4,25 +4,34 @@ import Foundation
 /// Concrete `VideoPlayer` adapter that wraps an `AVFoundation.AVPlayer` and translates its
 /// KVO-observable state and notifications into `VideoPlayerEvent`s.
 ///
+/// Deliberately **internal**: how the SDK subscribes to AVFoundation is an implementation detail,
+/// and callers must not drive `startObserving()`/`stopObserving()` themselves — doing so detaches
+/// observation without finalizing the in-flight snapshot. Consumers reach this adapter through the
+/// plugin's `trackVideo(player:options:)` entry point, which owns the observation lifecycle; the
+/// public extension point for custom/vendor players is the `VideoPlayer` protocol.
+///
 /// v1 assumption: `currentItem` is expected to be set (or left nil for the lifetime of this
 /// instance) before `startObserving()` is called. Item-level observers are attached once, against
 /// whatever `player.currentItem` is at `startObserving()` time; if the caller swaps
 /// `player.replaceCurrentItem(with:)` afterwards, item-scoped observation (`.ended`, `.seeking`,
 /// `.error`, `.bufferingEnded`) will keep referring to the original item, not the new one.
 ///
-/// In v1 the caller must therefore explicitly reconnect video tracking around an item swap:
+/// In v1 the consumer must therefore end and restart *tracking* around an item swap, so the old
+/// snapshot is finalized (`timeout: 0`) rather than left to expire on its TTL:
 ///
 /// ```swift
-/// adapter.stopObserving()
-/// player.replaceCurrentItem(with: newItem)
-/// adapter.startObserving() // re-attaches item-level observation to the new item
+/// let stopTracking = plugin.trackVideo(player: avPlayer, options: oldOptions)
+/// // ...
+/// stopTracking()                    // finalizes the old snapshot (timeout: 0) + stopObserving()
+/// avPlayer.replaceCurrentItem(with: newItem)
+/// let stopTracking2 = plugin.trackVideo(player: avPlayer, options: newOptions)  // new viewSessionId
 /// ```
 ///
 /// `AVQueuePlayer` advances `currentItem` internally with no hook for this recipe and is not
 /// supported in v1. Automatic re-attachment (KVO on `player.currentItem`) is deferred to v2,
 /// where an item swap must also surface to the tracking layer as a content change (new view
 /// session with fresh caller-supplied metadata).
-public final class AVPlayerVideoPlayer: VideoPlayer {
+final class AVPlayerVideoPlayer: VideoPlayer {
     private let player: AVPlayer
     private var isObserving = false
 
@@ -36,14 +45,14 @@ public final class AVPlayerVideoPlayer: VideoPlayer {
     /// does not exist; the notification is posted by `AVPlayerItem`, not `AVPlayer`.
     private var timeJumpedObserver: NSObjectProtocol?
 
-    public var onEvent: ((VideoPlayerEvent) -> Void)?
+    var onEvent: ((VideoPlayerEvent) -> Void)?
 
-    public var currentTime: TimeInterval {
+    var currentTime: TimeInterval {
         let seconds = player.currentTime().seconds
         return seconds.isFinite ? seconds : 0
     }
 
-    public var duration: TimeInterval? {
+    var duration: TimeInterval? {
         guard let item = player.currentItem else { return nil }
         let duration = item.duration
         guard !duration.isIndefinite else { return nil }
@@ -51,7 +60,7 @@ public final class AVPlayerVideoPlayer: VideoPlayer {
         return seconds.isFinite ? seconds : nil
     }
 
-    public init(_ player: AVPlayer) {
+    init(_ player: AVPlayer) {
         self.player = player
     }
 
@@ -59,7 +68,7 @@ public final class AVPlayerVideoPlayer: VideoPlayer {
         stopObserving()
     }
 
-    public func startObserving() {
+    func startObserving() {
         guard !isObserving else { return }
         isObserving = true
 
@@ -99,7 +108,7 @@ public final class AVPlayerVideoPlayer: VideoPlayer {
         }
     }
 
-    public func stopObserving() {
+    func stopObserving() {
         isObserving = false
 
         timeControlStatusToken = nil

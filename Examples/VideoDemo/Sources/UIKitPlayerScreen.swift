@@ -72,7 +72,7 @@ final class UIKitPlayerViewController: UIViewController {
             self?.teardownPlayer()
         }
 
-        // TODO(video-analytics): plugin.trackVideo(player: AVPlayerVideoPlayer(player), options: ...)
+        // TODO(video-analytics): plugin.trackVideo(player: player, options: ...)
 
         present(playerViewController, animated: true) {
             player.play()
