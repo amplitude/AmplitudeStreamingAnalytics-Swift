@@ -83,7 +83,13 @@ final class AVPlayerVideoPlayer: VideoPlayer {
         // currentItem-swap assumption above: all item-level observation attaches to the item
         // present at startObserving() time, or not at all.
         if let item = player.currentItem {
-            itemStatusToken = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            // `.initial` as well as `.new`: `status` is monotonic with `.failed` terminal, so an
+            // item that already failed before observation began would otherwise never report it.
+            // `.initial` delivers that value atomically as part of registration, leaving no window
+            // in which a transition could both fire KVO *and* be replayed afterwards — which would
+            // double-report the error. Side-effect-free for the ordinary case, because
+            // `handleItemStatusChange` ignores every status but `.failed`.
+            itemStatusToken = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
                 self?.handleItemStatusChange(item)
             }
             itemLikelyToKeepUpToken = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
@@ -107,26 +113,24 @@ final class AVPlayerVideoPlayer: VideoPlayer {
             }
         }
 
-        emitCurrentState()
+        emitCurrentPlaybackState()
     }
 
-    /// Replays state that `.new`-only KVO cannot deliver, because it predates `startObserving()`.
+    /// Replays an already-playing player, which `.new`-only KVO cannot deliver because the
+    /// transition predates `startObserving()`. Without it, attaching to a player that is already
+    /// playing emits no `.played`, so no view session is ever opened for it.
     ///
-    /// KVO fires on *transitions*, but both observed properties can already hold their significant
-    /// value when observation begins: `AVPlayerItem.status` is monotonic with `.failed` terminal,
-    /// so an item that failed before tracking started would never emit `.error` (and, never having
-    /// played, would produce no view session at all — a failed playback would be invisible rather
-    /// than reported); likewise a player already playing would never emit `.played`.
+    /// `timeControlStatus` cannot use the `.initial` trick that `status` does above: its initial
+    /// value is meaningful for every player, so `.initial` would emit a spurious `.paused` on every
+    /// `startObserving()` for a freshly-created one. The cost of reading it after registration is a
+    /// narrow window — if the player starts playing between registration and this read, KVO and
+    /// this replay can both emit `.played`. Consumers must therefore treat a repeated `.played`
+    /// with no intervening `.paused` as a no-op; the tracker's state machine emits STARTED on
+    /// pause→play transitions, so it already does.
     ///
-    /// Deliberately an explicit call at the end of `startObserving()` rather than KVO's `.initial`
-    /// option: `.initial` fires the block part-way through registration, and on `timeControlStatus`
-    /// it would also emit a spurious `.paused` for any freshly-created player. Consumers may
-    /// therefore receive an event synchronously, before `startObserving()` returns.
-    private func emitCurrentState() {
-        if let item = player.currentItem, item.status == .failed {
-            onEvent?(.error(message: item.error?.localizedDescription))
-            return
-        }
+    /// Called synchronously from `startObserving()`, so consumers may receive an event before that
+    /// call returns.
+    private func emitCurrentPlaybackState() {
         if player.timeControlStatus == .playing {
             onEvent?(.played)
         }
