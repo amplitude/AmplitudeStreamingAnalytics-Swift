@@ -1,31 +1,25 @@
 import AmplitudeSwift
 import Foundation
 
-/// One delayed event awaiting server-side ingestion.
-///
-/// `timeoutMs` is the TTL last sent to the server; `isFinal` marks an entry that should be
-/// flushed (`timeout: 0`) on the next pulse instead of upserted.
 struct DelayedEntry: Codable {
     var event: BaseEvent
     var timeoutMs: Int64
     var isFinal: Bool
 }
 
-/// Everything the pipeline must survive a process kill with: the delay id the server
-/// correlates requests by, the in-flight snapshots keyed by `insert_id`, and instant
-/// events that have not been acknowledged yet.
 struct DelayedState: Codable {
+    static let currentVersion = 1
+
+    // Bumped on any breaking change to this shape; lets a future `load()` branch on it
+    // instead of discarding old-format state outright.
+    var version: Int = DelayedState.currentVersion
     var delayId: String
     var entries: [String: DelayedEntry]
     var pendingInstantEvents: [BaseEvent]
 }
 
-/// Persists `DelayedState` as a single JSON file so snapshots outlive the process.
-///
-/// Deliberately uses only `fileExists`, `Data(contentsOf:)` and an atomic `write` — no
-/// file-timestamp or disk-space attribute reads — so the package's privacy manifest needs
-/// no `NSPrivacyAccessedAPITypes` entry. Emptiness is judged by content length, not by
-/// file attributes, for the same reason.
+// Uses only `fileExists` / `Data(contentsOf:)` / atomic `write` — no file-timestamp or
+// disk-space reads — so the privacy manifest needs no `NSPrivacyAccessedAPITypes` entry.
 final class DelayedSnapshotStore {
     private let fileUrl: URL
     private let logger: (any Logger)?
@@ -35,8 +29,6 @@ final class DelayedSnapshotStore {
         self.logger = logger
     }
 
-    /// True when a previous run left snapshots behind. Used at plugin setup to decide
-    /// whether stale entries need flushing, without instantiating a pipeline first.
     static func hasPersistedState(apiKey: String, instanceName: String) -> Bool {
         let url = fileUrl(apiKey: apiKey, instanceName: instanceName)
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
