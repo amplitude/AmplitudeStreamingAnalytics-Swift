@@ -24,6 +24,12 @@ final class DelayedSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(loaded?.entries["ins-1"]?.event.eventType, "Video Content Stopped")
         XCTAssertEqual(loaded?.entries["ins-1"]?.timeoutMs, 3_600_000)
         XCTAssertEqual(loaded?.entries["ins-1"]?.isFinal, false)
+        XCTAssertEqual(loaded?.version, DelayedState.currentVersion)
+    }
+
+    func testStateDefaultsToCurrentVersion() {
+        let state = DelayedState(delayId: "d", entries: [:], pendingInstantEvents: [])
+        XCTAssertEqual(state.version, DelayedState.currentVersion)
     }
 
     func testClearRemovesState() {
