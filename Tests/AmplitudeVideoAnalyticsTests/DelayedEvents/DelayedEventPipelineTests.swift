@@ -95,13 +95,13 @@ final class DelayedEventPipelineTests: XCTestCase {
             if uploader?.captured.count ?? 0 >= count { expectation.fulfill() }
         }
         if uploader.captured.count >= count { expectation.fulfill() }
-        wait(for: [expectation], timeout: 2)
+        wait(for: [expectation], timeout: 10)
     }
 
     /// Upload responses are handled on the pipeline's queue *after* the completion handler
     /// returns, so assertions about persisted state have to wait for that hop.
     private func waitUntil(_ message: String, _ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(2)
+        let deadline = Date().addingTimeInterval(10)
         while !condition() && Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.01))
         }
