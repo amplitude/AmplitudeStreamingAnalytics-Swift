@@ -1,0 +1,120 @@
+import XCTest
+
+@testable import AmplitudeVideoAnalytics
+
+/// Thread-safe fire counter shared between the timer's dispatch queue and the test thread.
+final class PulseTimerFireCounter {
+    private let lock = NSLock()
+    private var count = 0
+
+    func increment() -> Int {
+        lock.withLock {
+            count += 1
+            return count
+        }
+    }
+
+    func read() -> Int {
+        lock.withLock { count }
+    }
+}
+
+final class PulseTimerTests: XCTestCase {
+    func testResumeFiresHandler() {
+        let counter = PulseTimerFireCounter()
+        let queue = DispatchQueue(label: "com.amplitude.pulseTimerTests.resume")
+        let firedExpectation = expectation(description: "handler fires after resume")
+
+        let timer = PulseTimer(interval: 0.05, queue: queue) {
+            if counter.increment() == 1 {
+                firedExpectation.fulfill()
+            }
+        }
+        timer.resume()
+
+        wait(for: [firedExpectation], timeout: 2)
+        XCTAssertGreaterThanOrEqual(counter.read(), 1)
+    }
+
+    func testSuspendAfterResumeStopsFurtherFiring() {
+        let counter = PulseTimerFireCounter()
+        let queue = DispatchQueue(label: "com.amplitude.pulseTimerTests.suspend")
+        let firstFireExpectation = expectation(description: "first fire")
+        let noSecondFireExpectation = expectation(description: "no fire after suspend")
+        noSecondFireExpectation.isInverted = true
+
+        let timer = PulseTimer(interval: 0.05, queue: queue) {
+            let value = counter.increment()
+            if value == 1 {
+                firstFireExpectation.fulfill()
+            } else if value >= 2 {
+                noSecondFireExpectation.fulfill()
+            }
+        }
+        timer.resume()
+
+        wait(for: [firstFireExpectation], timeout: 2)
+        timer.suspend()
+
+        wait(for: [noSecondFireExpectation], timeout: 0.3)
+    }
+
+    func testDoubleResumeIsIdempotent() {
+        let queue = DispatchQueue(label: "com.amplitude.pulseTimerTests.doubleResume")
+        let timer = PulseTimer(interval: 60, queue: queue) {}
+
+        timer.resume()
+        timer.resume()
+
+        // The second resume() call must hit the early-return guard rather than
+        // resuming an already-resumed DispatchSourceTimer (which would crash).
+        XCTAssertTrue(true, "no crash on double resume")
+    }
+
+    func testSecondSuspendIsIdempotent() {
+        let queue = DispatchQueue(label: "com.amplitude.pulseTimerTests.doubleSuspend")
+        let timer = PulseTimer(interval: 60, queue: queue) {}
+
+        timer.resume()
+        timer.suspend()
+        timer.suspend()
+
+        // The second suspend() call must hit the early-return guard rather than
+        // suspending an already-suspended DispatchSourceTimer (which would crash).
+        XCTAssertTrue(true, "no crash on double suspend")
+    }
+
+    func testSuspendOnNeverResumedTimerIsNoOp() {
+        let queue = DispatchQueue(label: "com.amplitude.pulseTimerTests.neverResumedSuspend")
+        let timer = PulseTimer(interval: 60, queue: queue) {}
+
+        timer.suspend()
+
+        // suspend() on a timer that started suspended (and was never resumed) must
+        // hit the early-return guard rather than suspending an already-suspended timer.
+        XCTAssertTrue(true, "no crash suspending a never-resumed timer")
+    }
+
+    func testDeinitWhileSuspendedDoesNotCrash() {
+        let queue = DispatchQueue(label: "com.amplitude.pulseTimerTests.deinitSuspended")
+        var timer: PulseTimer? = PulseTimer(interval: 60, queue: queue) {}
+
+        // Never resumed: still suspended when deallocated. deinit must resume
+        // the timer before cancelling it to avoid a crash.
+        timer = nil
+
+        XCTAssertNil(timer)
+    }
+
+    func testDeinitWhileResumedDoesNotCrash() {
+        let queue = DispatchQueue(label: "com.amplitude.pulseTimerTests.deinitResumed")
+        var timer: PulseTimer? = PulseTimer(interval: 60, queue: queue) {}
+
+        timer?.resume()
+
+        // Already resumed: deinit must cancel directly without resuming again.
+        timer = nil
+
+        XCTAssertNil(timer)
+    }
+}

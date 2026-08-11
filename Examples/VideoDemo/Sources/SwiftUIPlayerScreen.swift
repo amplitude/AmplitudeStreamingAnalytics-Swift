@@ -11,7 +11,7 @@ struct SwiftUIPlayerScreen: View {
         VideoPlayer(player: player)
             .ignoresSafeArea()
             .onAppear {
-                // TODO(video-analytics): plugin.trackVideo(player: AVPlayerVideoPlayer(player), options: ...)
+                // TODO(video-analytics): plugin.trackVideo(player: player, options: ...)
             }
     }
 }
