@@ -4,18 +4,25 @@ import Foundation
 struct DelayedEntry: Codable {
     var event: BaseEvent
     var timeoutMs: Int64
-    var isFinal: Bool
+
+    // Stamped on every mutation. A completing request only removes the entry it actually
+    // sent, so a snapshot refreshed while the request was in flight survives.
+    var revision: Int = 0
 }
 
+/// One delay id's worth of outstanding work — one DynamoDB row's contents.
 struct DelayedState: Codable {
+    var entries: [String: DelayedEntry]  // keyed by insert_id
+    var pendingInstantEvents: [BaseEvent]
+}
+
+/// The whole persisted file. `version` lives here, not on the individual records.
+struct DelayedStore: Codable {
     static let currentVersion = 1
 
-    // Bumped on any breaking change to this shape; lets a future `load()` branch on it
-    // instead of discarding old-format state outright.
-    var version: Int = DelayedState.currentVersion
-    var delayId: String
-    var entries: [String: DelayedEntry]
-    var pendingInstantEvents: [BaseEvent]
+    // Forward hook only: there is no earlier on-disk format, so `load()` never branches on it.
+    var version: Int = DelayedStore.currentVersion
+    var states: [String: DelayedState]  // keyed by delayId
 }
 
 // Uses only `fileExists` / `Data(contentsOf:)` / atomic `write` — no file-timestamp or
@@ -36,10 +43,10 @@ final class DelayedSnapshotStore {
         return !data.isEmpty
     }
 
-    func load() -> DelayedState? {
+    func load() -> DelayedStore? {
         guard let data = try? Data(contentsOf: fileUrl), !data.isEmpty else { return nil }
         do {
-            return try JSONDecoder().decode(DelayedState.self, from: data)
+            return try JSONDecoder().decode(DelayedStore.self, from: data)
         } catch {
             logger?.error(message: "Delayed events state unreadable, discarding: \(error)")
             clear()
@@ -47,9 +54,9 @@ final class DelayedSnapshotStore {
         }
     }
 
-    func save(_ state: DelayedState) {
+    func save(_ store: DelayedStore) {
         do {
-            let data = try JSONEncoder().encode(state)
+            let data = try JSONEncoder().encode(store)
             try FileManager.default.createDirectory(at: fileUrl.deletingLastPathComponent(),
                                                    withIntermediateDirectories: true)
             try data.write(to: fileUrl, options: .atomic)
