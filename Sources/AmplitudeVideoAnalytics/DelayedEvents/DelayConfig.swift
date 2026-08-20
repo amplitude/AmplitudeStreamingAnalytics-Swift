@@ -1,20 +1,15 @@
 import Foundation
 
-/// How long the server should hold an event before ingesting it.
+/// How the delayed pipeline should handle an event.
 ///
-/// `timeout` is in **seconds**:
-///   - `nil` — not delayed; the event rides along as an instant event and is ingested now
-///   - `0` — finalize: flush the stored snapshot for this `insert_id` immediately
-///   - `> 0` — upsert: replace the stored snapshot and extend its TTL
-///
-/// `id` is reserved for a future per-event delay id. v1 keys everything off a single
-/// pipeline-level delay id, so a non-nil value here is carried but not acted on.
-struct DelayConfig {
-    let id: String?
-    let timeout: TimeInterval?
+/// Two cases, not three, because the wire has exactly two buckets: `events` (upserted under a
+/// TTL) and `instant_events` (ingested now). "Finalize" is not a separate intent — it is
+/// `.instant` for an `insert_id` that happens to have a live snapshot.
+enum DelayConfig {
+    /// Ingest now, via `instant_events`. If a snapshot already exists for this event's
+    /// `insert_id`, this *is* its finalization: the snapshot is dropped in the same mutation.
+    case instant
 
-    init(id: String? = nil, timeout: TimeInterval?) {
-        self.id = id
-        self.timeout = timeout
-    }
+    /// Upsert the snapshot for this event's `insert_id` and extend its TTL, in seconds.
+    case delayed(timeout: TimeInterval)
 }
