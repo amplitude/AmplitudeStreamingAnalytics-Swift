@@ -4,7 +4,7 @@ import Foundation
 struct DelayedEntry: Codable {
     var event: BaseEvent
     var timeoutMs: Int64
-    // Stamped on every mutation, so a completing request only removes what it actually sent.
+    // Stamped on mutation so a completing request only removes what it actually sent.
     var revision: Int = 0
 }
 
@@ -14,7 +14,6 @@ struct DelayedState: Codable {
     var pendingInstantEvents: [BaseEvent]
 }
 
-/// The persisted file: every delay id this install still has undelivered work for.
 struct DelayedStore: Codable {
     static let currentVersion = 1
 
@@ -22,8 +21,7 @@ struct DelayedStore: Codable {
     var states: [String: DelayedState]  // delayId -> its outstanding work
 }
 
-// Keep to `fileExists` / `Data(contentsOf:)` / atomic `write`: timestamp or disk-space reads
-// would force an `NSPrivacyAccessedAPITypes` entry in the privacy manifest.
+// Timestamp or disk-space reads here would force an `NSPrivacyAccessedAPITypes` entry.
 final class DelayedSnapshotStore {
     private let fileUrl: URL
     private let logger: (any Logger)?
@@ -45,8 +43,7 @@ final class DelayedSnapshotStore {
         guard let data = try? Data(contentsOf: fileUrl), !data.isEmpty else { return nil }
         do {
             let decoded = try JSONDecoder().decode(DelayedStore.self, from: data)
-            // A newer SDK's file decodes cleanly here — unknown keys are ignored — so a
-            // version we don't know could carry semantics we'd misread.
+            // Unknown keys decode silently, so a newer file could carry semantics we'd misread.
             guard decoded.version <= DelayedStore.currentVersion else {
                 logger?.error(message: "Delayed events state is version \(decoded.version), "
                     + "newer than \(DelayedStore.currentVersion); discarding")
@@ -61,9 +58,8 @@ final class DelayedSnapshotStore {
         }
     }
 
-    /// A drained store leaves no file. An empty one still encodes to non-empty JSON, which
-    /// would keep `hasPersistedState` true forever.
     func save(_ store: DelayedStore) {
+        // An empty store still encodes non-empty, which would pin `hasPersistedState` true.
         guard !store.states.isEmpty else {
             clear()
             return
@@ -80,9 +76,7 @@ final class DelayedSnapshotStore {
         }
     }
 
-    /// Restoring an hour-old snapshot onto another device would flush stale heartbeats stamped
-    /// with the original device's ids. `setResourceValues` is costly, so run it once per instance
-    /// the way `PersistentStorage` does rather than on every save.
+    /// `setResourceValues` is costly, so run it once per instance rather than on every save.
     private func excludeFromBackupIfNeeded(_ directory: URL) {
         guard !didExcludeFromBackup else { return }
         var url = directory
@@ -105,15 +99,14 @@ final class DelayedSnapshotStore {
             .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
         let root = directory.appendingPathComponent("com.amplitude.delayed", isDirectory: true)
         let scoped = appScope().map { root.appendingPathComponent($0, isDirectory: true) } ?? root
-        // Hashed the way DiagnosticsStorage sanitizes its instance name. Fixed-length hex keeps
-        // the two values unambiguous and keeps path separators out of a customer-supplied string.
+        // Hashed like DiagnosticsStorage: keeps the two values unambiguous across the separator
+        // and keeps path components out of a customer-supplied instance name.
         return scoped.appendingPathComponent(
             "delayed-\(apiKey.fnv1a64String())-\(instanceName.fnv1a64String()).json")
     }
 
-    /// Non-sandboxed macOS apps share Application Support, so scope by app the way
-    /// `PersistentStorage` does — otherwise two apps sharing an api key share one file.
-    /// Mirrors `SandboxHelper`, which is public but not constructible from here.
+    /// Non-sandboxed macOS apps share Application Support, so two apps sharing an api key would
+    /// otherwise share a file. Mirrors `PersistentStorage.getAppPath`.
     private static func appScope() -> String? {
         #if os(macOS)
         guard ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] == nil else { return nil }
