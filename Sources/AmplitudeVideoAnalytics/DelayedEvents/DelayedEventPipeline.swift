@@ -139,17 +139,24 @@ final class DelayedEventPipeline {
     }
 
     private func flushCarriedOverKeys() {
-        var dropped = false
+        var agedOut = false
+        var rehomed: [BaseEvent] = []
         for delayId in carriedOver.keys.sorted() {
             guard var state = carriedOver[delayId], !state.isEmpty else { continue }
 
             if hasOutlivedItsTimeout(state) {
-                // The server row has already TTL-expired and been ingested, so flushing would
-                // only produce a duplicate. Dropping it also bounds the offline-relaunch case.
-                logger?.debug(message: "Delayed events key \(delayId) dropped unsent: "
-                    + "its newest snapshot is past its own timeout")
+                // The server row has already TTL-expired and been ingested, so re-sending its
+                // snapshots would only produce a duplicate. Its instants are a different matter:
+                // they only ever ingest from a request body, so these were never delivered
+                // anywhere and move to the current key rather than dying with the row. Instants
+                // are id-agnostic — the server never stores them against the row — so re-homing
+                // costs nothing, and the size cap remains the bound on offline accumulation.
+                logger?.debug(message: "Delayed events key \(delayId) aged out: dropping "
+                    + "\(state.entries.count) snapshot(s), keeping "
+                    + "\(state.pendingInstantEvents.count) instant event(s)")
+                rehomed += state.pendingInstantEvents
                 carriedOver.removeValue(forKey: delayId)
-                dropped = true
+                agedOut = true
                 continue
             }
 
@@ -161,10 +168,11 @@ final class DelayedEventPipeline {
             persist()
             send(delayId: delayId, events: [], timeoutMs: 0, sentRevisions: [:])
         }
-        if dropped {
-            persist()
-            updateTimer()
-        }
+        guard agedOut else { return }
+        // Re-homed instants predate anything queued on the current key, so they go first.
+        current.pendingInstantEvents.insert(contentsOf: rehomed, at: 0)
+        persist()
+        updateTimer()
     }
 
     private func send(delayId: String,

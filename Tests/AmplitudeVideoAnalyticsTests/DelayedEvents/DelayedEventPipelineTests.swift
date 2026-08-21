@@ -282,6 +282,29 @@ final class DelayedEventPipelineTests: XCTestCase {
         XCTAssertTrue(uploader.captured.isEmpty)
     }
 
+    /// Ageing out only justifies discarding the snapshots — the server ingested those when the
+    /// row's TTL fired. Instants only ever ingest from a request body, so an undelivered one
+    /// moves to the current key instead of dying with the row.
+    func testAgedOutCarriedOverKeyKeepsItsPendingInstants() {
+        let aged = DelayedState(entries: ["stale-1": DelayedEntry(event: stopped("stale-1"),
+                                                                  timeoutMs: 1_000)],
+                                pendingInstantEvents: [started("undelivered-1")])
+        store.save(DelayedStore(states: ["d-old": aged]))
+
+        let relaunched = makePipeline()
+        relaunched.flushPersistedEntries()
+        // FIFO barrier: this pulse is queued behind the age-out, and nothing goes out under the
+        // old id, so the single request it produces is the current key's.
+        relaunched.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
+        waitForUpload(count: 1)
+
+        let only = uploader.captured[0]
+        XCTAssertEqual(only.id, relaunched.currentDelayId)
+        XCTAssertEqual(only.events.map(\.insertId), ["stop-1"])
+        XCTAssertEqual(only.instantEvents?.map(\.insertId), ["undelivered-1"])
+        waitUntil("aged-out key leaves the file") { store.load()?.states["d-old"] == nil }
+    }
+
     // MARK: - in-flight staleness
 
     /// A `timeout: 0` request deletes the row, but only the row it carried: a snapshot tracked
