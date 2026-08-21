@@ -8,17 +8,18 @@ struct DelayedEntry: Codable {
     var revision: Int = 0
 }
 
-/// One delay id's worth of outstanding work — one server row's contents.
+/// Everything outstanding under one delay id — what a single server row holds.
 struct DelayedState: Codable {
-    var entries: [String: DelayedEntry]  // keyed by insert_id
+    var entries: [String: DelayedEntry]  // insert_id -> its latest snapshot
     var pendingInstantEvents: [BaseEvent]
 }
 
+/// The persisted file: every delay id this install still has undelivered work for.
 struct DelayedStore: Codable {
     static let currentVersion = 1
 
     var version: Int = DelayedStore.currentVersion
-    var states: [String: DelayedState]  // keyed by delayId
+    var states: [String: DelayedState]  // delayId -> its outstanding work
 }
 
 // Keep to `fileExists` / `Data(contentsOf:)` / atomic `write`: timestamp or disk-space reads
