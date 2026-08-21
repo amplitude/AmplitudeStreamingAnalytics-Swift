@@ -12,6 +12,8 @@ struct DelayedEntry: Codable {
 struct DelayedState: Codable {
     var entries: [String: DelayedEntry]  // insert_id -> its latest snapshot
     var pendingInstantEvents: [BaseEvent]
+
+    var isEmpty: Bool { entries.isEmpty && pendingInstantEvents.isEmpty }
 }
 
 struct DelayedStore: Codable {
@@ -19,6 +21,9 @@ struct DelayedStore: Codable {
 
     var version: Int = DelayedStore.currentVersion
     var states: [String: DelayedState]  // delayId -> its outstanding work
+
+    // A key holding an empty state is still no outstanding work, so check depth, not count.
+    var isEmpty: Bool { states.values.allSatisfy(\.isEmpty) }
 }
 
 // Timestamp or disk-space reads here would force an `NSPrivacyAccessedAPITypes` entry.
@@ -58,9 +63,9 @@ final class DelayedSnapshotStore {
         }
     }
 
-    func save(_ store: DelayedStore) {
+    func persist(_ store: DelayedStore) {
         // An empty store still encodes non-empty, which would pin `hasPersistedState` true.
-        guard !store.states.isEmpty else {
+        guard !store.isEmpty else {
             clear()
             return
         }
