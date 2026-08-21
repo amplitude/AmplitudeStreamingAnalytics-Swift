@@ -66,55 +66,37 @@ final class DelayedSnapshotStore {
     func persist(_ store: DelayedStore) {
         // `isEmpty` is deep: keys holding nothing count as empty. Every store encodes to
         // non-empty JSON, so writing one regardless would pin `hasPersistedState` true.
-        let dir = fileUrl.deletingLastPathComponent().path
         guard !store.isEmpty else {
-            DelayedDiag.log("persist EMPTY dir=\(dir) file=\(fileUrl.lastPathComponent)")
             clear()
             return
         }
         do {
             let data = try JSONEncoder().encode(store)
             let directory = fileUrl.deletingLastPathComponent()
-            DelayedDiag.log("persist ENTER dir=\(dir) file=\(fileUrl.lastPathComponent) "
-                + "\(DelayedDiag.fsState(dir))")
             try FileManager.default.createDirectory(at: directory,
                                                    withIntermediateDirectories: true)
-            DelayedDiag.log("persist MKDIR-OK \(DelayedDiag.fsState(dir))")
             excludeFromBackupIfNeeded(directory)
             try data.write(to: fileUrl, options: .atomic)
-            DelayedDiag.log("persist WROTE \(DelayedDiag.fsState(dir)) "
-                + "fresh=\(DelayedDiag.freshRead(dir))")
         } catch {
-            DelayedDiag.log("persist THREW \(error)")
             logger?.error(message: "Delayed events state save failed: \(error)")
         }
     }
 
     /// `setResourceValues` is costly, so run it once per instance rather than on every save.
     private func excludeFromBackupIfNeeded(_ directory: URL) {
-        guard !didExcludeFromBackup else {
-            DelayedDiag.log("exclude SKIP(flag) dir=\(directory.path) "
-                + "\(DelayedDiag.fsState(directory.path))")
-            return
-        }
+        guard !didExcludeFromBackup else { return }
         var url = directory
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         do {
             try url.setResourceValues(values)
             didExcludeFromBackup = true
-            DelayedDiag.log("exclude SET dir=\(directory.path) "
-                + "\(DelayedDiag.fsState(directory.path)) "
-                + "fresh=\(DelayedDiag.freshRead(directory.path))")
         } catch {
-            DelayedDiag.log("exclude THREW \(error) dir=\(directory.path)")
             logger?.error(message: "Delayed events backup exclusion failed: \(error)")
         }
     }
 
     func clear() {
-        DelayedDiag.log("clear file=\(fileUrl.lastPathComponent) "
-            + "\(DelayedDiag.fsState(fileUrl.deletingLastPathComponent().path))")
         try? FileManager.default.removeItem(at: fileUrl)
     }
 

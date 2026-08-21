@@ -89,27 +89,17 @@ final class DelayedSnapshotStoreTests: XCTestCase {
         // The directory outlives any single test, so clear the flag first — otherwise this
         // passes on an attribute a previous run set.
         var cleared = fileUrl().deletingLastPathComponent()
-        DelayedDiag.log("TEST bundleId=\(String(describing: Bundle.main.bundleIdentifier))")
-        DelayedDiag.log("TEST exec=\(String(describing: Bundle.main.executablePath))")
-        DelayedDiag.log("TEST dir=\(cleared.path)")
         try FileManager.default.createDirectory(at: cleared, withIntermediateDirectories: true)
-        DelayedDiag.log("TEST after-mkdir \(DelayedDiag.fsState(cleared.path)) "
-            + "fresh=\(DelayedDiag.freshRead(cleared.path))")
         var off = URLResourceValues()
         off.isExcludedFromBackup = false
         try cleared.setResourceValues(off)
-        DelayedDiag.log("TEST after-set-false \(DelayedDiag.fsState(cleared.path)) "
-            + "fresh=\(DelayedDiag.freshRead(cleared.path))")
 
         DelayedSnapshotStore(apiKey: apiKey, instanceName: "i").persist(nonEmptyStore())
 
         // Read through a fresh URL: `setResourceValues` caches on the instance it was called
         // on, so re-reading that one can return what we wrote rather than what is on disk.
         let onDisk = fileUrl().deletingLastPathComponent()
-        DelayedDiag.log("TEST at-assert dir=\(onDisk.path) \(DelayedDiag.fsState(onDisk.path)) "
-            + "fresh=\(DelayedDiag.freshRead(onDisk.path))")
         let values = try onDisk.resourceValues(forKeys: [.isExcludedFromBackupKey])
-        DelayedDiag.log("TEST read=\(String(describing: values.isExcludedFromBackup))")
         XCTAssertEqual(values.isExcludedFromBackup, true)
     }
 
