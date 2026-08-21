@@ -86,13 +86,14 @@ final class DelayedSnapshotStoreTests: XCTestCase {
     }
 
     func testStorageDirectoryIsExcludedFromBackup() throws {
-        // The directory outlives any single test, so clear the flag first — otherwise this
-        // passes on an attribute a previous run set.
-        var cleared = fileUrl().deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: cleared, withIntermediateDirectories: true)
-        var off = URLResourceValues()
-        off.isExcludedFromBackup = false
-        try cleared.setResourceValues(off)
+        // The directory outlives any single test, so start from one that never carried the
+        // attribute rather than clearing it in place. Clearing races the exclusion under
+        // test: both updates go through the same macOS backup-metadata layer, and the clear
+        // can surface after the set — leaving the attribute gone or the read stale.
+        let directory = fileUrl().deletingLastPathComponent()
+        try? FileManager.default.removeItem(at: directory)
+        let before = try? directory.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertNotEqual(before?.isExcludedFromBackup, true)
 
         DelayedSnapshotStore(apiKey: apiKey, instanceName: "i").persist(nonEmptyStore())
 
