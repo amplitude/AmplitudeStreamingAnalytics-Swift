@@ -77,28 +77,20 @@ final class DelayedSnapshotStore {
             excludeFromBackupIfNeeded(directory)
             try data.write(to: fileUrl, options: .atomic)
         } catch {
-            print("DIAG persist THREW \(error)")
             logger?.error(message: "Delayed events state save failed: \(error)")
         }
     }
 
     /// `setResourceValues` is costly, so run it once per instance rather than on every save.
     private func excludeFromBackupIfNeeded(_ directory: URL) {
-        guard !didExcludeFromBackup else {
-            print("DIAG exclude SKIP(flag) dir=\(directory.path)")
-            return
-        }
+        guard !didExcludeFromBackup else { return }
         var url = directory
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         do {
             try url.setResourceValues(values)
             didExcludeFromBackup = true
-            let fresh = try? URL(fileURLWithPath: directory.path)
-                .resourceValues(forKeys: [.isExcludedFromBackupKey])
-            print("DIAG exclude SET dir=\(directory.path) readback=\(String(describing: fresh?.isExcludedFromBackup))")
         } catch {
-            print("DIAG exclude THREW \(error) dir=\(directory.path)")
             logger?.error(message: "Delayed events backup exclusion failed: \(error)")
         }
     }
