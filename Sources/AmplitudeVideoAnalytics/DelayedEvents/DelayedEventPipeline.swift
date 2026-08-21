@@ -7,25 +7,15 @@ private extension DelayedState {
 
 /// Keeps one snapshot per `insert_id` alive on the server until it is finalized.
 ///
-/// State is keyed by delay id, one key per server row. `currentDelayId` is minted fresh on every
-/// init and fixed for the launch; keys left behind by earlier launches are carried over and
-/// flushed under their own original ids, since those are the rows that actually exist.
-///
-/// All state lives behind a serial queue: `track` hands work off to it, uploads report back onto
-/// it, and the pulse timer fires on it. The timer is suspended whenever there is nothing
-/// outstanding, so an idle pipeline costs nothing.
-///
-/// Every mutation is persisted before the network is touched, so a process kill mid-flight leaves
-/// state on disk that the next launch can flush (`flushPersistedEntries`).
+/// State is keyed by delay id, one key per server row. All of it lives behind a serial queue and
+/// is persisted before the network is touched, so a kill mid-flight leaves something the next
+/// launch can flush.
 final class DelayedEventPipeline {
-    /// Ceiling on the whole persisted file, across every key. Matches the browser's
-    /// `EVENTS_SIZE_LIMIT = 4 * 10_000` (40,000 bytes, not the "4KB" its comment claims). The
-    /// binding constraint is `pendingInstantEvents` during an outage, not snapshot count: an
-    /// enriched snapshot is well under 2 KB, so this absorbs roughly thirty offline resumes.
+    // Browser parity (`EVENTS_SIZE_LIMIT = 4 * 10_000`). Sized for `pendingInstantEvents` piling
+    // up during an outage — roughly thirty offline resumes — not for snapshot count.
     private static let maxStateBytes = 40_000
 
-    /// Fixed for this launch. Only the *persisted* record of a delay id goes away, when its key
-    /// drains — which is what keeps the id from being pinned for the life of the install.
+    /// Fixed for this launch; only its *persisted* record goes away, when the key drains.
     let currentDelayId = UUID().uuidString
 
     private let configuration: Configuration
@@ -36,10 +26,8 @@ final class DelayedEventPipeline {
     private let queue = DispatchQueue(label: "delayedEvents.amplitude.com")
     private var timer: PulseTimer?
     private var current = DelayedState(entries: [:], pendingInstantEvents: [])
-    /// Delay ids minted by earlier launches whose server rows may still be live.
+    /// Delay ids from earlier launches whose server rows may still be live.
     private var carriedOver: [String: DelayedState]
-    /// Monotonic within the launch, which is all the in-flight guard needs — nothing is in
-    /// flight at launch, so a revision reloaded from disk cannot produce a false match.
     private var revisionCounter = 0
 
     init(configuration: Configuration,
@@ -65,8 +53,7 @@ final class DelayedEventPipeline {
         }
     }
 
-    /// Drains the keys previous launches left behind: each goes out under its own delay id so the
-    /// server ingests it instead of letting the row sit until its TTL fires.
+    /// Drains what previous launches left behind, each under its own delay id.
     func flushPersistedEntries() {
         queue.async { [weak self] in
             guard let self else { return }
@@ -86,8 +73,7 @@ final class DelayedEventPipeline {
         let shouldPulseNow: Bool
         switch delay {
         case .delayed(let timeout):
-            // A non-positive TTL would send the row's delete signal, which is never what an
-            // upsert means; fall back rather than drop the row out from under other snapshots.
+            // A non-positive TTL is the row's delete signal, never what an upsert means.
             let timeoutMs = timeout > 0 ? Int64(timeout * 1000) : defaultTimeoutMs
             let isFirstSighting = current.entries[insertId] == nil
             revisionCounter += 1
@@ -97,9 +83,6 @@ final class DelayedEventPipeline {
             // Later refreshes ride the timer; only a new snapshot needs the row created now.
             shouldPulseNow = isFirstSighting
         case .instant:
-            // An instant for a live snapshot *is* its finalization, in one mutation: the entry
-            // leaves `events` and the event rides `instant_events` in the very next request,
-            // alongside whatever snapshots are still live.
             current.entries.removeValue(forKey: insertId)
             current.pendingInstantEvents.append(event)
             shouldPulseNow = true
@@ -129,8 +112,7 @@ final class DelayedEventPipeline {
     private func pulseCurrentKey() {
         let live = current.entries.sorted { $0.key < $1.key }
         // Longest TTL wins so a short-lived snapshot cannot expire a longer-lived one early.
-        // With no live snapshots left, `timeout: 0` ingests the instants and deletes the row —
-        // the only thing that legitimately deletes it.
+        // With none left, `timeout: 0` ingests the instants and deletes the row.
         let timeoutMs = live.map(\.value.timeoutMs).max() ?? 0
         send(delayId: currentDelayId,
              events: live.map(\.value.event),
@@ -145,12 +127,9 @@ final class DelayedEventPipeline {
             guard var state = carriedOver[delayId], !state.isEmpty else { continue }
 
             if hasOutlivedItsTimeout(state) {
-                // The server row has already TTL-expired and been ingested, so re-sending its
-                // snapshots would only produce a duplicate. Its instants are a different matter:
-                // they only ever ingest from a request body, so these were never delivered
-                // anywhere and move to the current key rather than dying with the row. Instants
-                // are id-agnostic — the server never stores them against the row — so re-homing
-                // costs nothing, and the size cap remains the bound on offline accumulation.
+                // The row already TTL-expired and ingested, so resending its snapshots would
+                // only duplicate. Instants ingest from a request body alone, so these were
+                // never delivered and move to the current key instead of dying with the row.
                 logger?.debug(message: "Delayed events key \(delayId) aged out: dropping "
                     + "\(state.entries.count) snapshot(s), keeping "
                     + "\(state.pendingInstantEvents.count) instant event(s)")
@@ -160,8 +139,8 @@ final class DelayedEventPipeline {
                 continue
             }
 
-            // Everything under an old id goes out at once: the entries become instant events so
-            // one `timeout: 0` request ingests the lot and deletes the row.
+            // Entries become instant events so one `timeout: 0` request ingests the lot and
+            // deletes the row.
             state.pendingInstantEvents += state.entries.sorted { $0.key < $1.key }.map(\.value.event)
             state.entries = [:]
             carriedOver[delayId] = state
@@ -179,9 +158,8 @@ final class DelayedEventPipeline {
                       events: [BaseEvent],
                       timeoutMs: Int64,
                       sentRevisions: [String: Int]) {
-        // Instant events are claimed, not copied: they leave the state before the request goes
-        // out, so two overlapping requests can never both carry them (the server would ingest
-        // them twice). A failed request puts them back at the front of the queue.
+        // Claimed, not copied: instants leave the state before the request goes out so two
+        // overlapping requests can never both carry them. A failure puts them back up front.
         var instantEvents: [BaseEvent] = []
         mutate(delayId) {
             instantEvents = $0.pendingInstantEvents
@@ -213,17 +191,14 @@ final class DelayedEventPipeline {
                         instantEvents: [BaseEvent]) {
         switch result {
         case .success:
-            // `timeout: 0` made the server ingest the body and delete the row, so what this
-            // request carried is gone server-side. Nothing else is: a snapshot upserted at a
-            // live TTL has to be resent on every pulse, because the upsert replaces the row
-            // wholesale rather than merging into it.
+            // Only `timeout: 0` clears anything server-side. A live-TTL snapshot must be resent
+            // every pulse, because the upsert replaces the row wholesale rather than merging.
             if timeoutMs == 0 {
                 mutate(delayId) { removeSentEntries(&$0, sentRevisions) }
             }
         case .failure(let error):
             if case DelayedEventsError.httpError(let code, _) = error, code == 400 || code == 413 {
-                // The server will never accept this payload; retrying it forever would block
-                // everything behind it, so drop it (instant events included).
+                // Never going to be accepted; retrying forever would block everything behind it.
                 logger?.error(message: "Delayed events request rejected with HTTP \(code), "
                     + "dropping \(sentRevisions.count) entry(ies) and "
                     + "\(instantEvents.count) instant event(s)")
@@ -236,8 +211,8 @@ final class DelayedEventPipeline {
         updateTimer()
     }
 
-    /// Only removes what this request actually sent, at the revision it sent. A snapshot
-    /// refreshed while the request was in flight carries a newer revision and survives.
+    /// Removes only what this request sent, at the revision it sent — a snapshot refreshed
+    /// mid-flight carries a newer revision and survives.
     private func removeSentEntries(_ state: inout DelayedState, _ sentRevisions: [String: Int]) {
         for (insertId, revision) in sentRevisions where state.entries[insertId]?.revision == revision {
             state.entries.removeValue(forKey: insertId)
@@ -254,7 +229,6 @@ final class DelayedEventPipeline {
         }
     }
 
-    /// True once the newest snapshot under a key is older than its own TTL.
     private func hasOutlivedItsTimeout(_ state: DelayedState) -> Bool {
         let newest = state.entries.values.max { ($0.event.timestamp ?? 0) < ($1.event.timestamp ?? 0) }
         guard let newest, let timestamp = newest.event.timestamp else { return false }
@@ -275,8 +249,7 @@ final class DelayedEventPipeline {
         store.save(snapshot())
     }
 
-    /// A state that cannot even be encoded is treated as over the limit — it could not be
-    /// persisted anyway, so the mutation that produced it has to be reverted.
+    /// Unencodable counts as over the limit — it could not be persisted either way.
     private func withinSizeLimit() -> Bool {
         guard let data = try? JSONEncoder().encode(snapshot()) else { return false }
         return data.count <= Self.maxStateBytes
