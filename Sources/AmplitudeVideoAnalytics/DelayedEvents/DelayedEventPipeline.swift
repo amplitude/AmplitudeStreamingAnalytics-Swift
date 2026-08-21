@@ -1,10 +1,6 @@
 import AmplitudeSwift
 import Foundation
 
-private extension DelayedState {
-    var isEmpty: Bool { entries.isEmpty && pendingInstantEvents.isEmpty }
-}
-
 /// Keeps one snapshot per `insert_id` alive on the server until it is finalized.
 ///
 /// State is keyed by delay id, one key per server row. All of it lives behind a serial queue and
@@ -283,7 +279,7 @@ final class DelayedEventPipeline {
     /// A drained key leaves the file entirely; `currentDelayId` survives in memory regardless.
     private func persist() {
         carriedOver = carriedOver.filter { !$0.value.isEmpty }
-        store.save(snapshot())
+        store.persist(snapshot())
     }
 
     private func withinSizeLimit() -> Bool {

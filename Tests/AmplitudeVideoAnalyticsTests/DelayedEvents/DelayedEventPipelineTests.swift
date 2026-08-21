@@ -269,7 +269,7 @@ final class DelayedEventPipelineTests: XCTestCase {
         let expired = DelayedState(entries: ["stale-1": DelayedEntry(event: stopped("stale-1"),
                                                                      timeoutMs: 1_000)],
                                    pendingInstantEvents: [started("undelivered-1")])
-        store.save(DelayedStore(states: ["d-old": expired]))
+        store.persist(DelayedStore(states: ["d-old": expired]))
 
         let relaunched = makePipeline()
         relaunched.flushPersistedEntries()
