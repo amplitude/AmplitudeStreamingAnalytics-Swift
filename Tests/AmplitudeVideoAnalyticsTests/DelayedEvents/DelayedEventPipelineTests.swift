@@ -14,21 +14,6 @@ final class FakeDelayedUploader: DelayedEventsUploading {
     /// Holds completions instead of firing them, so a mutation can land mid-flight.
     private var deferred = false
     private var pending: [(Result<DelayedResponseBody, Error>) -> Void] = []
-    private var uploadObserver: (() -> Void)?
-
-    /// Called after the completion handler returns, so pipeline state is already settled.
-    var onUpload: (() -> Void)? {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return uploadObserver
-        }
-        set {
-            lock.lock()
-            uploadObserver = newValue
-            lock.unlock()
-        }
-    }
 
     var captured: [DelayedRequestBody] {
         lock.lock()
@@ -69,7 +54,6 @@ final class FakeDelayedUploader: DelayedEventsUploading {
         requests.append(body)
         let scripted = result
         let holdIt = deferred
-        let observer = uploadObserver
         if holdIt {
             pending.append(completion)
         }
@@ -77,7 +61,6 @@ final class FakeDelayedUploader: DelayedEventsUploading {
         if !holdIt {
             completion(scripted)
         }
-        observer?()
         return nil
     }
 
@@ -144,24 +127,19 @@ final class DelayedEventPipelineTests: XCTestCase {
         Int64(Date().timeIntervalSince1970 * 1000)
     }
 
-    private func waitForUpload(count: Int) {
-        let expectation = expectation(description: "upload \(count)")
-        expectation.assertForOverFulfill = false
-        uploader.onUpload = { [uploader] in
-            if uploader?.captured.count ?? 0 >= count { expectation.fulfill() }
+    /// Runs the pipelines' queues to quiescence, so every assertion below observes a settled
+    /// state with no deadline involved. An upload completion hops back onto the queue, and the
+    /// work it schedules can upload again, so one drain is not enough: repeat until no further
+    /// request appears.
+    private func settle(_ others: DelayedEventPipeline...) {
+        var all: [DelayedEventPipeline] = [pipeline]
+        all += others
+        var previous = -1
+        while previous != uploader.captured.count {
+            previous = uploader.captured.count
+            all.forEach { $0.drainForTesting() }
+            all.forEach { $0.drainForTesting() }
         }
-        if uploader.captured.count >= count { expectation.fulfill() }
-        wait(for: [expectation], timeout: 10)
-    }
-
-    /// Upload responses are handled on the pipeline's queue *after* the completion handler
-    /// returns, so assertions about persisted state have to wait for that hop.
-    private func waitUntil(_ message: String, _ condition: () -> Bool) {
-        let deadline = Date().addingTimeInterval(10)
-        while !condition() && Date() < deadline {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
-        }
-        XCTAssertTrue(condition(), message)
     }
 
     private func request(underId id: String) -> DelayedRequestBody? {
@@ -175,8 +153,9 @@ final class DelayedEventPipelineTests: XCTestCase {
     func testFirstDelayedTrackSendsUpsertUnderTheCurrentDelayId() {
         pipeline.track(started("start-1"), delay: .instant)
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 2)
+        settle()
 
+        XCTAssertEqual(uploader.captured.count, 2)
         let last = uploader.captured.last!
         XCTAssertEqual(last.timeout, 3_600_000)
         XCTAssertEqual(last.events.map(\.insertId), ["stop-1"])
@@ -186,22 +165,22 @@ final class DelayedEventPipelineTests: XCTestCase {
 
     func testInstantEventsDroppedAfterSuccess() {
         pipeline.track(started("start-1"), delay: .instant)
-        waitForUpload(count: 1)
+        settle()
         XCTAssertEqual(uploader.captured[0].instantEvents?.map(\.insertId), ["start-1"])
 
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 2)
+        settle()
         XCTAssertNil(uploader.captured.last!.instantEvents)
     }
 
     func testInstantEventsRetainedAfterFailure() {
         uploader.nextResult = .failure(DelayedEventsError.httpError(code: 500, data: nil))
         pipeline.track(started("start-1"), delay: .instant)
-        waitForUpload(count: 1)
+        settle()
 
         uploader.nextResult = .success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil))
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 2)
+        settle()
         XCTAssertEqual(uploader.captured.last!.instantEvents?.map(\.insertId), ["start-1"])
     }
 
@@ -209,7 +188,7 @@ final class DelayedEventPipelineTests: XCTestCase {
     /// `events` when `timeout == 0`, so an empty `events` is legal and needs no Dynamo row.
     func testLoneInstantSendsTimeoutZeroWithEmptyEvents() {
         pipeline.track(started("start-1"), delay: .instant)
-        waitForUpload(count: 1)
+        settle()
 
         let only = uploader.captured[0]
         XCTAssertEqual(only.timeout, 0)
@@ -224,10 +203,10 @@ final class DelayedEventPipelineTests: XCTestCase {
     func testFinalRidesInstantEventsAlongsideLiveSnapshots() {
         pipeline.track(stopped("stop-a"), delay: .delayed(timeout: 3600))
         pipeline.track(stopped("stop-b"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 2)
+        settle()
 
         pipeline.track(stopped("stop-a"), delay: .instant)
-        waitForUpload(count: 3)
+        settle()
         let last = uploader.captured.last!
         XCTAssertEqual(last.timeout, 3_600_000)
         XCTAssertEqual(last.events.map(\.insertId), ["stop-b"])
@@ -236,23 +215,23 @@ final class DelayedEventPipelineTests: XCTestCase {
 
     func testRequestTimeoutIsZeroOnlyWhenTheLastSnapshotDrains() {
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
+        settle()
         XCTAssertEqual(uploader.captured[0].timeout, 3_600_000)
 
         pipeline.track(stopped("stop-1"), delay: .instant)
-        waitForUpload(count: 2)
+        settle()
         let last = uploader.captured.last!
         XCTAssertEqual(last.timeout, 0)
         XCTAssertTrue(last.events.isEmpty)
         XCTAssertEqual(last.instantEvents?.map(\.insertId), ["stop-1"])
-        waitUntil("drained key leaves the file") { store.load()?.states.isEmpty ?? true }
+        XCTAssertTrue(store.load()?.states.isEmpty ?? true, "drained key leaves the file")
     }
 
     // MARK: - delay id rotation
 
     func testFreshDelayIdMintedPerInstanceEvenWithStateOnDisk() {
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
+        settle()
         let firstId = uploader.captured[0].id
         XCTAssertNotNil(store.load()?.states[firstId])
 
@@ -260,7 +239,7 @@ final class DelayedEventPipelineTests: XCTestCase {
         XCTAssertNotEqual(relaunched.currentDelayId, firstId)
 
         relaunched.track(stopped("stop-2"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 2)
+        settle(relaunched)
         let upsert = request(underId: relaunched.currentDelayId)
         XCTAssertEqual(upsert?.events.map(\.insertId), ["stop-2"])
         XCTAssertEqual(upsert?.timeout, 3_600_000)
@@ -268,12 +247,12 @@ final class DelayedEventPipelineTests: XCTestCase {
 
     func testCarriedOverKeysFlushUnderTheirOriginalId() {
         pipeline.track(stopped("stale-1", timestamp: nowMs()), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
+        settle()
         let originalId = uploader.captured[0].id
 
         let relaunched = makePipeline()
         relaunched.flushPersistedEntries()
-        waitForUpload(count: 2)
+        settle(relaunched)
 
         let flush = uploader.captured.last!
         XCTAssertEqual(flush.id, originalId)
@@ -281,7 +260,7 @@ final class DelayedEventPipelineTests: XCTestCase {
         XCTAssertEqual(flush.timeout, 0)
         XCTAssertTrue(flush.events.isEmpty)
         XCTAssertEqual(flush.instantEvents?.map(\.insertId), ["stale-1"])
-        waitUntil("flushed key leaves the file") { store.load()?.states.isEmpty ?? true }
+        XCTAssertTrue(store.load()?.states.isEmpty ?? true, "flushed key leaves the file")
     }
 
     /// No age-out. An entry carries no acknowledgement state, so age cannot distinguish "the
@@ -294,7 +273,7 @@ final class DelayedEventPipelineTests: XCTestCase {
 
         let relaunched = makePipeline()
         relaunched.flushPersistedEntries()
-        waitForUpload(count: 1)
+        settle(relaunched)
 
         let flushed = uploader.captured[0]
         XCTAssertEqual(flushed.id, "d-old")
@@ -302,7 +281,7 @@ final class DelayedEventPipelineTests: XCTestCase {
         XCTAssertEqual(flushed.timeout, 0)
         XCTAssertTrue(flushed.events.isEmpty)
         XCTAssertEqual(flushed.instantEvents?.map(\.insertId), ["undelivered-1", "stale-1"])
-        waitUntil("flushed key leaves the file") { store.load()?.states.isEmpty ?? true }
+        XCTAssertTrue(store.load()?.states.isEmpty ?? true, "flushed key leaves the file")
     }
 
     // MARK: - one in-flight request per delay id
@@ -310,28 +289,25 @@ final class DelayedEventPipelineTests: XCTestCase {
     func testPulseWhileARequestIsInFlightDoesNotSend() {
         uploader.deferCompletion = true
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
+        settle()
+        XCTAssertEqual(uploader.captured.count, 1)
 
         pipeline.track(stopped("stop-2"), delay: .delayed(timeout: 3600))
-        waitUntil("second snapshot recorded") {
-            store.load()?.states[pipeline.currentDelayId]?.entries["stop-2"] != nil
-        }
+        settle()
         XCTAssertEqual(uploader.captured.count, 1)
     }
 
     func testSkippedPulseIsCoalescedOnceTheInFlightRequestCompletes() {
         uploader.deferCompletion = true
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
-
         pipeline.track(stopped("stop-2"), delay: .delayed(timeout: 3600))
-        waitUntil("second snapshot recorded") {
-            store.load()?.states[pipeline.currentDelayId]?.entries["stop-2"] != nil
-        }
+        settle()
+        XCTAssertEqual(uploader.captured.count, 1)
 
         uploader.deferCompletion = false
         uploader.completePending(.success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil)))
-        waitForUpload(count: 2)
+        settle()
+        XCTAssertEqual(uploader.captured.count, 2)
         XCTAssertEqual(uploader.captured.last!.events.map(\.insertId), ["stop-1", "stop-2"])
     }
 
@@ -342,7 +318,7 @@ final class DelayedEventPipelineTests: XCTestCase {
     func testClaimedInstantsStayPersistedWhileInFlightAndClearOnSuccess() {
         uploader.deferCompletion = true
         pipeline.track(started("start-1"), delay: .instant)
-        waitForUpload(count: 1)
+        settle()
         XCTAssertEqual(uploader.captured[0].instantEvents?.map(\.insertId), ["start-1"])
 
         let inFlight = store.load()?.states[pipeline.currentDelayId]?.pendingInstantEvents
@@ -350,7 +326,8 @@ final class DelayedEventPipelineTests: XCTestCase {
 
         uploader.deferCompletion = false
         uploader.completePending(.success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil)))
-        waitUntil("claimed instants cleared on success") { store.load()?.states.isEmpty ?? true }
+        settle()
+        XCTAssertTrue(store.load()?.states.isEmpty ?? true, "claimed instants cleared on success")
     }
 
     /// The claim covers exactly the prefix that went out, so an instant queued mid-flight is not
@@ -358,16 +335,14 @@ final class DelayedEventPipelineTests: XCTestCase {
     func testInstantQueuedMidFlightSurvivesTheCompletingRequest() {
         uploader.deferCompletion = true
         pipeline.track(started("start-1"), delay: .instant)
-        waitForUpload(count: 1)
-
         pipeline.track(started("start-2"), delay: .instant)
-        waitUntil("second instant queued") {
-            store.load()?.states[pipeline.currentDelayId]?.pendingInstantEvents.count == 2
-        }
+        settle()
+        XCTAssertEqual(uploader.captured.count, 1)
 
         uploader.deferCompletion = false
         uploader.completePending(.success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil)))
-        waitForUpload(count: 2)
+        settle()
+        XCTAssertEqual(uploader.captured.count, 2)
         XCTAssertEqual(uploader.captured.last!.instantEvents?.map(\.insertId), ["start-2"])
     }
 
@@ -378,17 +353,14 @@ final class DelayedEventPipelineTests: XCTestCase {
     func testSnapshotTrackedMidFlightSurvivesACompletingFinalRequest() {
         uploader.deferCompletion = true
         pipeline.track(started("start-1"), delay: .instant)
-        waitForUpload(count: 1)
-        XCTAssertEqual(uploader.captured[0].timeout, 0)
-
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitUntil("mid-flight snapshot recorded") {
-            store.load()?.states[pipeline.currentDelayId]?.entries["stop-1"] != nil
-        }
+        settle()
+        XCTAssertEqual(uploader.captured.count, 1)
+        XCTAssertEqual(uploader.captured[0].timeout, 0)
 
         uploader.deferCompletion = false
         uploader.completePending(.success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil)))
-        waitForUpload(count: 2)
+        settle()
         XCTAssertEqual(uploader.captured.last!.events.map(\.insertId), ["stop-1"])
         XCTAssertEqual(uploader.captured.last!.timeout, 3_600_000)
     }
@@ -398,19 +370,17 @@ final class DelayedEventPipelineTests: XCTestCase {
     func testSnapshotRefreshedMidFlightIsNotDroppedByARejectedRequest() {
         uploader.deferCompletion = true
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
+        settle()
 
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))  // bumps the revision
-        waitUntil("refresh recorded") {
-            (store.load()?.states[pipeline.currentDelayId]?.entries["stop-1"]?.revision ?? 0) > 1
-        }
+        pipeline.track(stopped("stop-2"), delay: .delayed(timeout: 3600))  // pulses; skipped
+        settle()
+        XCTAssertEqual(uploader.captured.count, 1)
 
         uploader.deferCompletion = false
         uploader.completeOldestPending(.failure(DelayedEventsError.httpError(code: 400, data: nil)))
-        // FIFO barrier: this pulse is queued behind the completion handler, so what it
-        // carries is exactly the state that handler left behind.
-        pipeline.track(stopped("stop-2"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 2)
+        settle()
+        XCTAssertEqual(uploader.captured.count, 2)
         XCTAssertEqual(uploader.captured.last!.events.map(\.insertId), ["stop-1", "stop-2"])
     }
 
@@ -419,13 +389,13 @@ final class DelayedEventPipelineTests: XCTestCase {
     /// Truncating a sub-millisecond TTL to `0` would turn an upsert into the row-delete signal.
     func testSubMillisecondTimeoutClampsToOneMillisecond() {
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 0.0004))
-        waitForUpload(count: 1)
+        settle()
         XCTAssertEqual(uploader.captured[0].timeout, 1)
     }
 
     func testTimeoutAboveTwentyFourHoursClampsToTheServerMaximum() {
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 172_800))
-        waitForUpload(count: 1)
+        settle()
         XCTAssertEqual(uploader.captured[0].timeout, 86_400_000)
     }
 
@@ -433,7 +403,7 @@ final class DelayedEventPipelineTests: XCTestCase {
     func testNonFiniteTimeoutFallsBackToTheDefault() {
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: .infinity))
         pipeline.track(stopped("stop-2"), delay: .delayed(timeout: .nan))
-        waitForUpload(count: 2)
+        settle()
         XCTAssertEqual(uploader.captured.last!.timeout, 3_600_000)
     }
 
@@ -443,12 +413,12 @@ final class DelayedEventPipelineTests: XCTestCase {
     /// players are still holding open, so it refuses instead.
     func testFlushRefusesTheCurrentKeyWhileSnapshotsAreLive() {
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
+        settle()
 
         pipeline.flushForTesting(pipeline.currentDelayId)
         // FIFO barrier: this instant's own pulse is queued behind the refused flush.
         pipeline.track(started("start-1"), delay: .instant)
-        waitForUpload(count: 2)
+        settle()
 
         let last = uploader.captured.last!
         XCTAssertEqual(last.timeout, 3_600_000)
@@ -465,7 +435,7 @@ final class DelayedEventPipelineTests: XCTestCase {
         // FIFO on the pipeline's serial queue: once this small event has uploaded, the
         // oversized track above has already been processed (and reverted).
         pipeline.track(stopped("small-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
+        settle()
 
         XCTAssertEqual(uploader.captured.count, 1)
         XCTAssertEqual(uploader.captured[0].events.map(\.insertId), ["small-1"])
@@ -477,7 +447,7 @@ final class DelayedEventPipelineTests: XCTestCase {
         pipeline.track(anonymous, delay: .delayed(timeout: 3600))
 
         pipeline.track(stopped("small-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
+        settle()
 
         XCTAssertEqual(uploader.captured.count, 1)
         XCTAssertEqual(uploader.captured[0].events.map(\.insertId), ["small-1"])
@@ -486,25 +456,25 @@ final class DelayedEventPipelineTests: XCTestCase {
     func testBadRequestDropsEntry() {
         uploader.nextResult = .failure(DelayedEventsError.httpError(code: 400, data: nil))
         pipeline.track(stopped("rejected-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
-        waitUntil("rejected entry dropped") { store.load()?.states.isEmpty ?? true }
+        settle()
+        XCTAssertTrue(store.load()?.states.isEmpty ?? true, "rejected entry dropped")
 
         // The next snapshot must not drag the rejected one along.
         uploader.nextResult = .success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil))
         pipeline.track(stopped("kept-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 2)
+        settle()
         XCTAssertEqual(uploader.captured.last!.events.map(\.insertId), ["kept-1"])
     }
 
     func testServerErrorKeepsEntryForRetry() {
         uploader.nextResult = .failure(DelayedEventsError.httpError(code: 500, data: nil))
         pipeline.track(stopped("retry-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 1)
+        settle()
 
-        // Serial queue ordering: the failure has been handled by the time this second
-        // track runs, so the next upload proves the entry survived it.
+        // The failure has been handled by the time this second track runs, so the next
+        // upload proves the entry survived it.
         pipeline.track(stopped("retry-2"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 2)
+        settle()
         XCTAssertEqual(uploader.captured.last!.events.map(\.insertId), ["retry-1", "retry-2"])
         XCTAssertNotNil(store.load()?.states[pipeline.currentDelayId]?.entries["retry-1"])
     }

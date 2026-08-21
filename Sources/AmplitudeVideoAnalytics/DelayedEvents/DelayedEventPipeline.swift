@@ -11,8 +11,7 @@ private extension DelayedState {
 /// is persisted before the network is touched, so a kill mid-flight leaves something the next
 /// launch can flush.
 final class DelayedEventPipeline {
-    // Browser parity (`EVENTS_SIZE_LIMIT = 4 * 10_000`). Sized for `pendingInstantEvents` piling
-    // up during an outage — roughly thirty offline resumes — not for snapshot count.
+    // Browser parity (`EVENTS_SIZE_LIMIT = 4 * 10_000`), sized for `pendingInstantEvents` piling up during an outage — roughly thirty offline resumes — not for snapshot count.
     private static let maxStateBytes = 40_000
     private static let minTimeoutMs: Int64 = 1
     // The servlet's `MAX_TIMEOUT_MS`; anything larger comes back as a 400.
@@ -73,6 +72,11 @@ final class DelayedEventPipeline {
         queue.async { [weak self] in
             self?.flush(delayId)
         }
+    }
+
+    /// Test seam: lets a test sequence on the queue instead of polling against a deadline.
+    func drainForTesting() {
+        queue.sync {}
     }
 
     // MARK: - queue-confined state
@@ -153,8 +157,7 @@ final class DelayedEventPipeline {
              sentRevisions: live.reduce(into: [:]) { $0[$1.key] = $1.value.revision })
     }
 
-    /// Finalizes a key: entries ride `instant_events`, so one `timeout: 0` request ingests them
-    /// from the body and deletes the row.
+    /// Finalizes a key: entries ride `instant_events`, so one `timeout: 0` request ingests them from the body and deletes the row.
     private func flush(_ delayId: String) {
         // Carried-over keys are abandoned by definition, but the current key's live snapshots
         // belong to players still running — finalizing them would delete the row underneath.
