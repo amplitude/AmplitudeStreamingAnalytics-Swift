@@ -50,10 +50,7 @@ final class DelayedSnapshotStoreTests: XCTestCase {
     }
 
     private func fileUrl() -> URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first!
-            .appendingPathComponent("com.amplitude.delayed", isDirectory: true)
-            .appendingPathComponent("delayed-\(apiKey)-i.json")
+        DelayedSnapshotStore.fileUrl(apiKey: apiKey, instanceName: "i")
     }
 
     private func nonEmptyStore() -> DelayedStore {

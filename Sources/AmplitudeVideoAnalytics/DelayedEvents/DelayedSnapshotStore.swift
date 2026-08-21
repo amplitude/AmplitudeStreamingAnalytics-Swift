@@ -81,11 +81,24 @@ final class DelayedSnapshotStore {
         try? FileManager.default.removeItem(at: fileUrl)
     }
 
-    private static func fileUrl(apiKey: String, instanceName: String) -> URL {
+    static func fileUrl(apiKey: String, instanceName: String) -> URL {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return directory
-            .appendingPathComponent("com.amplitude.delayed", isDirectory: true)
-            .appendingPathComponent("delayed-\(apiKey)-\(instanceName).json")
+        let root = directory.appendingPathComponent("com.amplitude.delayed", isDirectory: true)
+        let scoped = appScope().map { root.appendingPathComponent($0, isDirectory: true) } ?? root
+        return scoped.appendingPathComponent("delayed-\(apiKey)-\(instanceName).json")
+    }
+
+    /// Non-sandboxed macOS apps share Application Support, so scope by app the way
+    /// `PersistentStorage` does — otherwise two apps sharing an api key share one file.
+    /// Mirrors `SandboxHelper`, which is public but not constructible from here.
+    private static func appScope() -> String? {
+        #if os(macOS)
+        guard ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] == nil else { return nil }
+        return Bundle.main.bundleIdentifier
+            ?? (Bundle.main.executablePath ?? ProcessInfo.processInfo.processName).fnv1a64String()
+        #else
+        return nil
+        #endif
     }
 }
