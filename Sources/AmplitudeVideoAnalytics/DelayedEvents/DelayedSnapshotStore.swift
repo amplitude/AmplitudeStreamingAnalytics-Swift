@@ -64,7 +64,8 @@ final class DelayedSnapshotStore {
     }
 
     func persist(_ store: DelayedStore) {
-        // An empty store still encodes non-empty, which would pin `hasPersistedState` true.
+        // `isEmpty` is deep: keys holding nothing count as empty. Every store encodes to
+        // non-empty JSON, so writing one regardless would pin `hasPersistedState` true.
         guard !store.isEmpty else {
             clear()
             return
