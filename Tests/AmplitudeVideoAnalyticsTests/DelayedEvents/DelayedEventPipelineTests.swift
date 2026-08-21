@@ -14,8 +14,21 @@ final class FakeDelayedUploader: DelayedEventsUploading {
     /// Holds completions instead of firing them, so a mutation can land mid-flight.
     private var deferred = false
     private var pending: [(Result<DelayedResponseBody, Error>) -> Void] = []
+    private var uploadObserver: (() -> Void)?
+
     /// Called after the completion handler returns, so pipeline state is already settled.
-    var onUpload: (() -> Void)?
+    var onUpload: (() -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return uploadObserver
+        }
+        set {
+            lock.lock()
+            uploadObserver = newValue
+            lock.unlock()
+        }
+    }
 
     var captured: [DelayedRequestBody] {
         lock.lock()
@@ -56,6 +69,7 @@ final class FakeDelayedUploader: DelayedEventsUploading {
         requests.append(body)
         let scripted = result
         let holdIt = deferred
+        let observer = uploadObserver
         if holdIt {
             pending.append(completion)
         }
@@ -63,7 +77,7 @@ final class FakeDelayedUploader: DelayedEventsUploading {
         if !holdIt {
             completion(scripted)
         }
-        onUpload?()
+        observer?()
         return nil
     }
 
@@ -270,39 +284,91 @@ final class DelayedEventPipelineTests: XCTestCase {
         waitUntil("flushed key leaves the file") { store.load()?.states.isEmpty ?? true }
     }
 
-    func testCarriedOverKeyPastItsOwnTimeoutIsDroppedUnsent() {
+    /// No age-out. An entry carries no acknowledgement state, so age cannot distinguish "the
+    /// server already TTL-ingested this" from "this never reached the server at all".
+    func testCarriedOverKeyPastItsOwnTimeoutIsStillFlushed() {
         let expired = DelayedState(entries: ["stale-1": DelayedEntry(event: stopped("stale-1"),
                                                                      timeoutMs: 1_000)],
-                                   pendingInstantEvents: [])
+                                   pendingInstantEvents: [started("undelivered-1")])
         store.save(DelayedStore(states: ["d-old": expired]))
 
         let relaunched = makePipeline()
         relaunched.flushPersistedEntries()
-        waitUntil("expired key leaves the file") { store.load()?.states.isEmpty ?? true }
-        XCTAssertTrue(uploader.captured.isEmpty)
-    }
-
-    /// Ageing out only justifies discarding the snapshots — the server ingested those when the
-    /// row's TTL fired. Instants only ever ingest from a request body, so an undelivered one
-    /// moves to the current key instead of dying with the row.
-    func testAgedOutCarriedOverKeyKeepsItsPendingInstants() {
-        let aged = DelayedState(entries: ["stale-1": DelayedEntry(event: stopped("stale-1"),
-                                                                  timeoutMs: 1_000)],
-                                pendingInstantEvents: [started("undelivered-1")])
-        store.save(DelayedStore(states: ["d-old": aged]))
-
-        let relaunched = makePipeline()
-        relaunched.flushPersistedEntries()
-        // FIFO barrier: this pulse is queued behind the age-out, and nothing goes out under the
-        // old id, so the single request it produces is the current key's.
-        relaunched.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
         waitForUpload(count: 1)
 
-        let only = uploader.captured[0]
-        XCTAssertEqual(only.id, relaunched.currentDelayId)
-        XCTAssertEqual(only.events.map(\.insertId), ["stop-1"])
-        XCTAssertEqual(only.instantEvents?.map(\.insertId), ["undelivered-1"])
-        waitUntil("aged-out key leaves the file") { store.load()?.states["d-old"] == nil }
+        let flushed = uploader.captured[0]
+        XCTAssertEqual(flushed.id, "d-old")
+        XCTAssertNotEqual(flushed.id, relaunched.currentDelayId)
+        XCTAssertEqual(flushed.timeout, 0)
+        XCTAssertTrue(flushed.events.isEmpty)
+        XCTAssertEqual(flushed.instantEvents?.map(\.insertId), ["undelivered-1", "stale-1"])
+        waitUntil("flushed key leaves the file") { store.load()?.states.isEmpty ?? true }
+    }
+
+    // MARK: - one in-flight request per delay id
+
+    func testPulseWhileARequestIsInFlightDoesNotSend() {
+        uploader.deferCompletion = true
+        pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
+        waitForUpload(count: 1)
+
+        pipeline.track(stopped("stop-2"), delay: .delayed(timeout: 3600))
+        waitUntil("second snapshot recorded") {
+            store.load()?.states[pipeline.currentDelayId]?.entries["stop-2"] != nil
+        }
+        XCTAssertEqual(uploader.captured.count, 1)
+    }
+
+    func testSkippedPulseIsCoalescedOnceTheInFlightRequestCompletes() {
+        uploader.deferCompletion = true
+        pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
+        waitForUpload(count: 1)
+
+        pipeline.track(stopped("stop-2"), delay: .delayed(timeout: 3600))
+        waitUntil("second snapshot recorded") {
+            store.load()?.states[pipeline.currentDelayId]?.entries["stop-2"] != nil
+        }
+
+        uploader.deferCompletion = false
+        uploader.completePending(.success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil)))
+        waitForUpload(count: 2)
+        XCTAssertEqual(uploader.captured.last!.events.map(\.insertId), ["stop-1", "stop-2"])
+    }
+
+    // MARK: - instant durability
+
+    /// A claim is in memory only: the events stay on disk for the whole request, so a process
+    /// killed mid-flight leaves them for the next launch.
+    func testClaimedInstantsStayPersistedWhileInFlightAndClearOnSuccess() {
+        uploader.deferCompletion = true
+        pipeline.track(started("start-1"), delay: .instant)
+        waitForUpload(count: 1)
+        XCTAssertEqual(uploader.captured[0].instantEvents?.map(\.insertId), ["start-1"])
+
+        let inFlight = store.load()?.states[pipeline.currentDelayId]?.pendingInstantEvents
+        XCTAssertEqual(inFlight?.map(\.insertId), ["start-1"])
+
+        uploader.deferCompletion = false
+        uploader.completePending(.success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil)))
+        waitUntil("claimed instants cleared on success") { store.load()?.states.isEmpty ?? true }
+    }
+
+    /// The claim covers exactly the prefix that went out, so an instant queued mid-flight is not
+    /// swept up by the completing request.
+    func testInstantQueuedMidFlightSurvivesTheCompletingRequest() {
+        uploader.deferCompletion = true
+        pipeline.track(started("start-1"), delay: .instant)
+        waitForUpload(count: 1)
+
+        pipeline.track(started("start-2"), delay: .instant)
+        waitUntil("second instant queued") {
+            store.load()?.states[pipeline.currentDelayId]?.pendingInstantEvents.count == 2
+        }
+
+        uploader.deferCompletion = false
+        uploader.completePending(.success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil)))
+        waitForUpload(count: 2)
+        XCTAssertEqual(uploader.captured.last!.instantEvents?.map(\.insertId), ["start-2"])
     }
 
     // MARK: - in-flight staleness
@@ -316,14 +382,15 @@ final class DelayedEventPipelineTests: XCTestCase {
         XCTAssertEqual(uploader.captured[0].timeout, 0)
 
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 2)
-        uploader.completePending(.success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil)))
+        waitUntil("mid-flight snapshot recorded") {
+            store.load()?.states[pipeline.currentDelayId]?.entries["stop-1"] != nil
+        }
 
-        // FIFO barrier: this pulse is queued behind the completion handlers, so what it
-        // carries is exactly the state they left behind.
-        pipeline.track(stopped("stop-2"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 3)
-        XCTAssertEqual(uploader.captured.last!.events.map(\.insertId), ["stop-1", "stop-2"])
+        uploader.deferCompletion = false
+        uploader.completePending(.success(DelayedResponseBody(id: "d", expiration: nil, flushed: nil)))
+        waitForUpload(count: 2)
+        XCTAssertEqual(uploader.captured.last!.events.map(\.insertId), ["stop-1"])
+        XCTAssertEqual(uploader.captured.last!.timeout, 3_600_000)
     }
 
     /// Revision guard proper: the rejected request carries revision N, but the entry has already
@@ -334,18 +401,61 @@ final class DelayedEventPipelineTests: XCTestCase {
         waitForUpload(count: 1)
 
         pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))  // bumps the revision
-        pipeline.track(started("start-1"), delay: .instant)                // forces the next pulse
-        waitForUpload(count: 2)
+        waitUntil("refresh recorded") {
+            (store.load()?.states[pipeline.currentDelayId]?.entries["stop-1"]?.revision ?? 0) > 1
+        }
 
+        uploader.deferCompletion = false
         uploader.completeOldestPending(.failure(DelayedEventsError.httpError(code: 400, data: nil)))
-        // FIFO barrier: this pulse is queued behind the completion handlers, so what it
-        // carries is exactly the state they left behind.
+        // FIFO barrier: this pulse is queued behind the completion handler, so what it
+        // carries is exactly the state that handler left behind.
         pipeline.track(stopped("stop-2"), delay: .delayed(timeout: 3600))
-        waitForUpload(count: 3)
+        waitForUpload(count: 2)
         XCTAssertEqual(uploader.captured.last!.events.map(\.insertId), ["stop-1", "stop-2"])
     }
 
+    // MARK: - TTL clamping
+
+    /// Truncating a sub-millisecond TTL to `0` would turn an upsert into the row-delete signal.
+    func testSubMillisecondTimeoutClampsToOneMillisecond() {
+        pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 0.0004))
+        waitForUpload(count: 1)
+        XCTAssertEqual(uploader.captured[0].timeout, 1)
+    }
+
+    func testTimeoutAboveTwentyFourHoursClampsToTheServerMaximum() {
+        pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 172_800))
+        waitForUpload(count: 1)
+        XCTAssertEqual(uploader.captured[0].timeout, 86_400_000)
+    }
+
+    /// `Int64(Double)` traps on a non-finite value, taking the host app with it.
+    func testNonFiniteTimeoutFallsBackToTheDefault() {
+        pipeline.track(stopped("stop-1"), delay: .delayed(timeout: .infinity))
+        pipeline.track(stopped("stop-2"), delay: .delayed(timeout: .nan))
+        waitForUpload(count: 2)
+        XCTAssertEqual(uploader.captured.last!.timeout, 3_600_000)
+    }
+
     // MARK: - guards
+
+    /// `flush` finalizes everything it touches. On the current key that would delete a row other
+    /// players are still holding open, so it refuses instead.
+    func testFlushRefusesTheCurrentKeyWhileSnapshotsAreLive() {
+        pipeline.track(stopped("stop-1"), delay: .delayed(timeout: 3600))
+        waitForUpload(count: 1)
+
+        pipeline.flushForTesting(pipeline.currentDelayId)
+        // FIFO barrier: this instant's own pulse is queued behind the refused flush.
+        pipeline.track(started("start-1"), delay: .instant)
+        waitForUpload(count: 2)
+
+        let last = uploader.captured.last!
+        XCTAssertEqual(last.timeout, 3_600_000)
+        XCTAssertEqual(last.events.map(\.insertId), ["stop-1"])
+        XCTAssertEqual(last.instantEvents?.map(\.insertId), ["start-1"])
+        XCTAssertEqual(uploader.captured.count, 2)
+    }
 
     func testOversizedStateRevertsMutation() {
         let bloated = stopped("huge-1")
