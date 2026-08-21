@@ -86,27 +86,42 @@ final class DelayedEventPipelineTests: XCTestCase {
     private var store: DelayedSnapshotStore!
     private var pipeline: DelayedEventPipeline!
     private let apiKey = "pipeline-test-\(UUID().uuidString)"
+    /// Tracked as they are built so tearDown cleans up after every one, not just the first.
+    private var builtPipelines: [DelayedEventPipeline] = []
+    private var usedApiKeys: Set<String> = []
 
     override func setUp() {
         super.setUp()
         uploader = FakeDelayedUploader()
-        store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
+        store = makeStore()
         pipeline = makePipeline()
     }
 
     override func tearDown() {
+        // Quiesce before clearing: a queue still holding a `persist` writes the file back
+        // after `clear()`, which is how these tests leaked state into the real
+        // Application Support directory.
+        builtPipelines.forEach { $0.drainForTesting() }
+        builtPipelines = []
         pipeline = nil
-        store.clear()
+        usedApiKeys.forEach { DelayedSnapshotStore(apiKey: $0, instanceName: "i").clear() }
         super.tearDown()
+    }
+
+    private func makeStore() -> DelayedSnapshotStore {
+        usedApiKeys.insert(apiKey)
+        return DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
     }
 
     /// `pulseInterval: 3600` keeps the timer from firing during the test — every upload
     /// observed here was triggered explicitly by `track`/`flushPersistedEntries`.
     private func makePipeline() -> DelayedEventPipeline {
-        DelayedEventPipeline(configuration: Configuration(apiKey: apiKey),
-                             store: store,
-                             httpClient: uploader,
-                             pulseInterval: 3600)
+        let built = DelayedEventPipeline(configuration: Configuration(apiKey: apiKey),
+                                         store: store,
+                                         httpClient: uploader,
+                                         pulseInterval: 3600)
+        builtPipelines.append(built)
+        return built
     }
 
     private func stopped(_ insertId: String, timestamp: Int64 = 1_752_000_000_000) -> BaseEvent {
