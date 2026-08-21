@@ -49,17 +49,56 @@ final class DelayedSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(DelayedStore.currentVersion, 1)
     }
 
+    private func fileUrl() -> URL {
+        DelayedSnapshotStore.fileUrl(apiKey: apiKey, instanceName: "i")
+    }
+
+    private func nonEmptyStore() -> DelayedStore {
+        DelayedStore(states: ["d": DelayedState(entries: [:], pendingInstantEvents: [])])
+    }
+
     func testUndecodableFileIsDiscarded() {
         let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
-        store.save(DelayedStore(states: [:]))
-        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first!
-            .appendingPathComponent("com.amplitude.delayed", isDirectory: true)
-            .appendingPathComponent("delayed-\(apiKey)-i.json")
-        try? Data("not json".utf8).write(to: url, options: .atomic)
+        store.save(nonEmptyStore())
+        try? Data("not json".utf8).write(to: fileUrl(), options: .atomic)
 
         XCTAssertNil(store.load())
         XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
+    }
+
+    func testFileFromNewerVersionIsDiscarded() throws {
+        let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
+        store.save(nonEmptyStore())
+        var future = nonEmptyStore()
+        future.version = DelayedStore.currentVersion + 1
+        try JSONEncoder().encode(future).write(to: fileUrl(), options: .atomic)
+
+        XCTAssertNil(store.load())
+        XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
+    }
+
+    func testAmbiguousApiKeyAndInstanceSplitsDoNotShareAFile() {
+        XCTAssertNotEqual(DelayedSnapshotStore.fileUrl(apiKey: "a-b", instanceName: "c"),
+                          DelayedSnapshotStore.fileUrl(apiKey: "a", instanceName: "b-c"))
+    }
+
+    func testPathSeparatorsInInstanceNameCannotEscapeTheDirectory() {
+        let url = DelayedSnapshotStore.fileUrl(apiKey: "k", instanceName: "../../escape")
+        XCTAssertEqual(url.deletingLastPathComponent(),
+                       DelayedSnapshotStore.fileUrl(apiKey: "k", instanceName: "i")
+                           .deletingLastPathComponent())
+        XCTAssertFalse(url.path.contains(".."))
+    }
+
+    func testSavingADrainedStoreLeavesNoFile() {
+        let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
+        store.save(nonEmptyStore())
+        XCTAssertTrue(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
+
+        store.save(DelayedStore(states: [:]))
+
+        XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
+        XCTAssertNil(store.load())
     }
 
     func testClearRemovesState() {
