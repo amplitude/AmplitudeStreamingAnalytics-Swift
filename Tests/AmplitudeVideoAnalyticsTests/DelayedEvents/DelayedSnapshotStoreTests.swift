@@ -30,7 +30,7 @@ final class DelayedSnapshotStoreTests: XCTestCase {
                 pendingInstantEvents: [instant]
             )
         ])
-        store.save(saved)
+        store.persist(saved)
 
         XCTAssertTrue(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
         let loaded = store.load()
@@ -53,13 +53,21 @@ final class DelayedSnapshotStoreTests: XCTestCase {
         DelayedSnapshotStore.fileUrl(apiKey: apiKey, instanceName: "i")
     }
 
-    private func nonEmptyStore() -> DelayedStore {
+    private func nonEmptyStore(delayId: String = "d") -> DelayedStore {
+        DelayedStore(states: [delayId: DelayedState(
+            entries: ["ins-1": entry(insertId: "ins-1", timeoutMs: 3_600_000)],
+            pendingInstantEvents: []
+        )])
+    }
+
+    /// Keys are present but hold nothing — no outstanding work, despite `states` being non-empty.
+    private func hollowStore() -> DelayedStore {
         DelayedStore(states: ["d": DelayedState(entries: [:], pendingInstantEvents: [])])
     }
 
     func testUndecodableFileIsDiscarded() {
         let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
-        store.save(nonEmptyStore())
+        store.persist(nonEmptyStore())
         try? Data("not json".utf8).write(to: fileUrl(), options: .atomic)
 
         XCTAssertNil(store.load())
@@ -68,7 +76,7 @@ final class DelayedSnapshotStoreTests: XCTestCase {
 
     func testFileFromNewerVersionIsDiscarded() throws {
         let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
-        store.save(nonEmptyStore())
+        store.persist(nonEmptyStore())
         var future = nonEmptyStore()
         future.version = DelayedStore.currentVersion + 1
         try JSONEncoder().encode(future).write(to: fileUrl(), options: .atomic)
@@ -80,15 +88,18 @@ final class DelayedSnapshotStoreTests: XCTestCase {
     func testStorageDirectoryIsExcludedFromBackup() throws {
         // The directory outlives any single test, so clear the flag first — otherwise this
         // passes on an attribute a previous run set.
-        var directory = fileUrl().deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var cleared = URLResourceValues()
-        cleared.isExcludedFromBackup = false
-        try directory.setResourceValues(cleared)
+        var cleared = fileUrl().deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: cleared, withIntermediateDirectories: true)
+        var off = URLResourceValues()
+        off.isExcludedFromBackup = false
+        try cleared.setResourceValues(off)
 
-        DelayedSnapshotStore(apiKey: apiKey, instanceName: "i").save(nonEmptyStore())
+        DelayedSnapshotStore(apiKey: apiKey, instanceName: "i").persist(nonEmptyStore())
 
-        let values = try directory.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        // Read through a fresh URL: `setResourceValues` caches on the instance it was called
+        // on, so re-reading that one can return what we wrote rather than what is on disk.
+        let onDisk = fileUrl().deletingLastPathComponent()
+        let values = try onDisk.resourceValues(forKeys: [.isExcludedFromBackupKey])
         XCTAssertEqual(values.isExcludedFromBackup, true)
     }
 
@@ -105,12 +116,23 @@ final class DelayedSnapshotStoreTests: XCTestCase {
         XCTAssertFalse(url.path.contains(".."))
     }
 
-    func testSavingADrainedStoreLeavesNoFile() {
+    func testPersistingADrainedStoreLeavesNoFile() {
         let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
-        store.save(nonEmptyStore())
+        store.persist(nonEmptyStore())
         XCTAssertTrue(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
 
-        store.save(DelayedStore(states: [:]))
+        store.persist(DelayedStore(states: [:]))
+
+        XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
+        XCTAssertNil(store.load())
+    }
+
+    func testPersistingAStoreWhoseKeysAreAllEmptyLeavesNoFile() {
+        let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
+        store.persist(nonEmptyStore())
+        XCTAssertTrue(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
+
+        store.persist(hollowStore())
 
         XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
         XCTAssertNil(store.load())
@@ -118,14 +140,14 @@ final class DelayedSnapshotStoreTests: XCTestCase {
 
     func testClearRemovesState() {
         let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
-        store.save(DelayedStore(states: ["d": DelayedState(entries: [:], pendingInstantEvents: [])]))
+        store.persist(nonEmptyStore())
         store.clear()
 
         XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
         XCTAssertNil(store.load())
     }
 
-    func testHasPersistedStateIsFalseBeforeAnySave() {
+    func testHasPersistedStateIsFalseBeforeAnyPersist() {
         XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
         XCTAssertNil(DelayedSnapshotStore(apiKey: apiKey, instanceName: "i").load())
     }
@@ -137,7 +159,7 @@ final class DelayedSnapshotStoreTests: XCTestCase {
             first.clear()
             second.clear()
         }
-        first.save(DelayedStore(states: ["d-one": DelayedState(entries: [:], pendingInstantEvents: [])]))
+        first.persist(nonEmptyStore(delayId: "d-one"))
 
         XCTAssertEqual(first.load()?.states.keys.map { $0 }, ["d-one"])
         XCTAssertNil(second.load())
