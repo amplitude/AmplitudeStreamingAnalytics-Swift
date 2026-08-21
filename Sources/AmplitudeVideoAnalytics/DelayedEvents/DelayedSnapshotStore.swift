@@ -43,7 +43,16 @@ final class DelayedSnapshotStore {
     func load() -> DelayedStore? {
         guard let data = try? Data(contentsOf: fileUrl), !data.isEmpty else { return nil }
         do {
-            return try JSONDecoder().decode(DelayedStore.self, from: data)
+            let decoded = try JSONDecoder().decode(DelayedStore.self, from: data)
+            // A newer SDK's file decodes cleanly here — unknown keys are ignored — so a
+            // version we don't know could carry semantics we'd misread.
+            guard decoded.version <= DelayedStore.currentVersion else {
+                logger?.error(message: "Delayed events state is version \(decoded.version), "
+                    + "newer than \(DelayedStore.currentVersion); discarding")
+                clear()
+                return nil
+            }
+            return decoded
         } catch {
             logger?.error(message: "Delayed events state unreadable, discarding: \(error)")
             clear()
@@ -51,7 +60,13 @@ final class DelayedSnapshotStore {
         }
     }
 
+    /// A drained store leaves no file. An empty one still encodes to non-empty JSON, which
+    /// would keep `hasPersistedState` true forever.
     func save(_ store: DelayedStore) {
+        guard !store.states.isEmpty else {
+            clear()
+            return
+        }
         do {
             let data = try JSONEncoder().encode(store)
             try FileManager.default.createDirectory(at: fileUrl.deletingLastPathComponent(),

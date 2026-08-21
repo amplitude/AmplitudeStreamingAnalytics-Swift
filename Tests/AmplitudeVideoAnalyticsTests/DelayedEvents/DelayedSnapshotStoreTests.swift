@@ -49,17 +49,46 @@ final class DelayedSnapshotStoreTests: XCTestCase {
         XCTAssertEqual(DelayedStore.currentVersion, 1)
     }
 
-    func testUndecodableFileIsDiscarded() {
-        let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
-        store.save(DelayedStore(states: [:]))
-        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+    private func fileUrl() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first!
             .appendingPathComponent("com.amplitude.delayed", isDirectory: true)
             .appendingPathComponent("delayed-\(apiKey)-i.json")
-        try? Data("not json".utf8).write(to: url, options: .atomic)
+    }
+
+    private func nonEmptyStore() -> DelayedStore {
+        DelayedStore(states: ["d": DelayedState(entries: [:], pendingInstantEvents: [])])
+    }
+
+    func testUndecodableFileIsDiscarded() {
+        let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
+        store.save(nonEmptyStore())
+        try? Data("not json".utf8).write(to: fileUrl(), options: .atomic)
 
         XCTAssertNil(store.load())
         XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
+    }
+
+    func testFileFromNewerVersionIsDiscarded() throws {
+        let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
+        store.save(nonEmptyStore())
+        var future = nonEmptyStore()
+        future.version = DelayedStore.currentVersion + 1
+        try JSONEncoder().encode(future).write(to: fileUrl(), options: .atomic)
+
+        XCTAssertNil(store.load())
+        XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
+    }
+
+    func testSavingADrainedStoreLeavesNoFile() {
+        let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
+        store.save(nonEmptyStore())
+        XCTAssertTrue(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
+
+        store.save(DelayedStore(states: [:]))
+
+        XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
+        XCTAssertNil(store.load())
     }
 
     func testClearRemovesState() {
