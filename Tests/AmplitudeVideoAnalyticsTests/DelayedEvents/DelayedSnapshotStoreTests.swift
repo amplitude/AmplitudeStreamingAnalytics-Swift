@@ -77,6 +77,21 @@ final class DelayedSnapshotStoreTests: XCTestCase {
         XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
     }
 
+    func testStorageDirectoryIsExcludedFromBackup() throws {
+        // The directory outlives any single test, so clear the flag first — otherwise this
+        // passes on an attribute a previous run set.
+        var directory = fileUrl().deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var cleared = URLResourceValues()
+        cleared.isExcludedFromBackup = false
+        try directory.setResourceValues(cleared)
+
+        DelayedSnapshotStore(apiKey: apiKey, instanceName: "i").save(nonEmptyStore())
+
+        let values = try directory.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertEqual(values.isExcludedFromBackup, true)
+    }
+
     func testAmbiguousApiKeyAndInstanceSplitsDoNotShareAFile() {
         XCTAssertNotEqual(DelayedSnapshotStore.fileUrl(apiKey: "a-b", instanceName: "c"),
                           DelayedSnapshotStore.fileUrl(apiKey: "a", instanceName: "b-c"))

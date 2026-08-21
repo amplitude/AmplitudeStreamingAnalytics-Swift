@@ -27,6 +27,7 @@ struct DelayedStore: Codable {
 final class DelayedSnapshotStore {
     private let fileUrl: URL
     private let logger: (any Logger)?
+    private var didExcludeFromBackup = false
 
     init(apiKey: String, instanceName: String, logger: (any Logger)? = nil) {
         self.fileUrl = Self.fileUrl(apiKey: apiKey, instanceName: instanceName)
@@ -69,11 +70,29 @@ final class DelayedSnapshotStore {
         }
         do {
             let data = try JSONEncoder().encode(store)
-            try FileManager.default.createDirectory(at: fileUrl.deletingLastPathComponent(),
+            let directory = fileUrl.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory,
                                                    withIntermediateDirectories: true)
+            excludeFromBackupIfNeeded(directory)
             try data.write(to: fileUrl, options: .atomic)
         } catch {
             logger?.error(message: "Delayed events state save failed: \(error)")
+        }
+    }
+
+    /// Restoring an hour-old snapshot onto another device would flush stale heartbeats stamped
+    /// with the original device's ids. `setResourceValues` is costly, so run it once per instance
+    /// the way `PersistentStorage` does rather than on every save.
+    private func excludeFromBackupIfNeeded(_ directory: URL) {
+        guard !didExcludeFromBackup else { return }
+        var url = directory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        do {
+            try url.setResourceValues(values)
+            didExcludeFromBackup = true
+        } catch {
+            logger?.error(message: "Delayed events backup exclusion failed: \(error)")
         }
     }
 
