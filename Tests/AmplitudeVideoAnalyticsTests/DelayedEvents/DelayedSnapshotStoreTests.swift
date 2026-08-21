@@ -77,6 +77,19 @@ final class DelayedSnapshotStoreTests: XCTestCase {
         XCTAssertFalse(DelayedSnapshotStore.hasPersistedState(apiKey: apiKey, instanceName: "i"))
     }
 
+    func testAmbiguousApiKeyAndInstanceSplitsDoNotShareAFile() {
+        XCTAssertNotEqual(DelayedSnapshotStore.fileUrl(apiKey: "a-b", instanceName: "c"),
+                          DelayedSnapshotStore.fileUrl(apiKey: "a", instanceName: "b-c"))
+    }
+
+    func testPathSeparatorsInInstanceNameCannotEscapeTheDirectory() {
+        let url = DelayedSnapshotStore.fileUrl(apiKey: "k", instanceName: "../../escape")
+        XCTAssertEqual(url.deletingLastPathComponent(),
+                       DelayedSnapshotStore.fileUrl(apiKey: "k", instanceName: "i")
+                           .deletingLastPathComponent())
+        XCTAssertFalse(url.path.contains(".."))
+    }
+
     func testSavingADrainedStoreLeavesNoFile() {
         let store = DelayedSnapshotStore(apiKey: apiKey, instanceName: "i")
         store.save(nonEmptyStore())

@@ -86,7 +86,10 @@ final class DelayedSnapshotStore {
             .first ?? URL(fileURLWithPath: NSTemporaryDirectory())
         let root = directory.appendingPathComponent("com.amplitude.delayed", isDirectory: true)
         let scoped = appScope().map { root.appendingPathComponent($0, isDirectory: true) } ?? root
-        return scoped.appendingPathComponent("delayed-\(apiKey)-\(instanceName).json")
+        // Hashed the way DiagnosticsStorage sanitizes its instance name. Fixed-length hex keeps
+        // the two values unambiguous and keeps path separators out of a customer-supplied string.
+        return scoped.appendingPathComponent(
+            "delayed-\(apiKey.fnv1a64String())-\(instanceName.fnv1a64String()).json")
     }
 
     /// Non-sandboxed macOS apps share Application Support, so scope by app the way
