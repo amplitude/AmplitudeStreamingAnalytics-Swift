@@ -4,29 +4,25 @@ import Foundation
 struct DelayedEntry: Codable {
     var event: BaseEvent
     var timeoutMs: Int64
-
-    // Stamped on every mutation. A completing request only removes the entry it actually
-    // sent, so a snapshot refreshed while the request was in flight survives.
+    // Stamped on every mutation, so a completing request only removes what it actually sent.
     var revision: Int = 0
 }
 
-/// One delay id's worth of outstanding work — one DynamoDB row's contents.
+/// One delay id's worth of outstanding work — one server row's contents.
 struct DelayedState: Codable {
     var entries: [String: DelayedEntry]  // keyed by insert_id
     var pendingInstantEvents: [BaseEvent]
 }
 
-/// The whole persisted file. `version` lives here, not on the individual records.
 struct DelayedStore: Codable {
     static let currentVersion = 1
 
-    // Forward hook only: there is no earlier on-disk format, so `load()` never branches on it.
     var version: Int = DelayedStore.currentVersion
     var states: [String: DelayedState]  // keyed by delayId
 }
 
-// Uses only `fileExists` / `Data(contentsOf:)` / atomic `write` — no file-timestamp or
-// disk-space reads — so the privacy manifest needs no `NSPrivacyAccessedAPITypes` entry.
+// Keep to `fileExists` / `Data(contentsOf:)` / atomic `write`: timestamp or disk-space reads
+// would force an `NSPrivacyAccessedAPITypes` entry in the privacy manifest.
 final class DelayedSnapshotStore {
     private let fileUrl: URL
     private let logger: (any Logger)?
