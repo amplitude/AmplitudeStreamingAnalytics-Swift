@@ -106,7 +106,8 @@ final class DelayedEventTracker {
     /// a request is already in flight — in which case that request's completion calls back
     /// here and sends it then.
     private func sendPendingRequest() {
-        guard !requestInFlight, needsSend || needsFlush, !entries.isEmpty else { return }
+        guard needsSend || needsFlush, !entries.isEmpty else { return }  // nothing to say
+        guard !requestInFlight else { return }  // say it when the wire is free; the completion calls back
         // A flush outranks a plain send: it is the request that has the server ingest the row
         // and delete it, so letting a plain send go in its place would drop the ingestion.
         let flushing = needsFlush
@@ -122,6 +123,10 @@ final class DelayedEventTracker {
         requestInFlight = true
         // TODO: retry failed uploads with backoff.
         // TODO: persist entries so in-flight events survive process death.
+        // TODO: buffer changes and send on a size or time threshold, rather than a request per
+        //       change with the pulse as the only other trigger. Sending as soon as state changes
+        //       is deliberate for now — it keeps the server-side integration simple to land and
+        //       verify; persistence would double as that buffer.
         httpClient.upload(body) { [weak self] result in
             guard let self else { return }
             if case .failure(let error) = result {
