@@ -19,6 +19,13 @@ final class PulseTimerFireCounter {
     }
 }
 
+/// Lets a timer's own event handler reach the `PulseTimer` that owns it, which is
+/// otherwise impossible because the handler is supplied to `init`. Weak so the
+/// handler does not retain the timer.
+final class WeakPulseTimerBox {
+    weak var timer: PulseTimer?
+}
+
 final class PulseTimerTests: XCTestCase {
     func testResumeFiresHandler() {
         let counter = PulseTimerFireCounter()
@@ -43,20 +50,29 @@ final class PulseTimerTests: XCTestCase {
         let noSecondFireExpectation = expectation(description: "no fire after suspend")
         noSecondFireExpectation.isInverted = true
 
+        // Suspending from the timer's own queue, inside the handler, is what makes
+        // this test deterministic: the serial queue cannot deliver another tick
+        // while the handler is still running, so suspend() lands before any second
+        // fire. Suspending from the test thread after wait() would race — a loaded
+        // runner can let the timer tick again before the test thread wakes up.
+        let box = WeakPulseTimerBox()
         let timer = PulseTimer(interval: 0.05, queue: queue) {
             let value = counter.increment()
             if value == 1 {
+                box.timer?.suspend()
                 firstFireExpectation.fulfill()
-            } else if value >= 2 {
+            } else if value == 2 {
+                // Only the second fire fulfills, so a hypothetical third one cannot
+                // trip XCTest's "multiple calls made to fulfill" API violation.
                 noSecondFireExpectation.fulfill()
             }
         }
+        box.timer = timer
         timer.resume()
 
         wait(for: [firstFireExpectation], timeout: 2)
-        timer.suspend()
-
         wait(for: [noSecondFireExpectation], timeout: 0.3)
+        XCTAssertEqual(counter.read(), 1)
     }
 
     func testDoubleResumeIsIdempotent() {
