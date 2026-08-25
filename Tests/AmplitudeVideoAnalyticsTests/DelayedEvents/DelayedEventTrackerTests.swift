@@ -8,6 +8,12 @@ final class DelayedEventTrackerTests: XCTestCase {
     override func setUp() {
         super.setUp()
         uploader = FakeDelayedEventsUploader()
+        uploader.autoSettle = ok
+    }
+
+    /// A successful response, for tests that do not care which one.
+    private var ok: Result<DelayedResponseBody, Error> {
+        .success(DelayedResponseBody(id: "d", expiration: 1, flushed: nil))
     }
 
     // MARK: - insert_id
@@ -36,22 +42,22 @@ final class DelayedEventTrackerTests: XCTestCase {
         XCTAssertEqual(uploader.bodies[0].id, uploader.bodies[1].id)
     }
 
-    func testSameTickTrackAndTrackDelayedCoalesceIntoOneUpload() {
+    func testTrackAndTrackDelayedCoalesceIntoOneUpload() {
         let tracker = makeTracker(delayTimeoutMs: 1_234)
-        // Hold the queue inside an unrelated upload so both tracks below are
-        // provably enqueued back-to-back before the coalescing hop can run.
-        let release = uploader.holdNextUpload()
-        tracker.track(makeEvent("warmup"))
+        // Keep an unrelated request in flight so both tracks below are provably enqueued
+        // before the tracker can issue anything for them.
+        uploader.autoSettle = nil
+        tracker.trackDelayed(makeEvent("warmup"))
         waitForUploads(1)
 
         tracker.track(makeEvent("start"))
         tracker.trackDelayed(makeEvent("stop"))
-        release()
+        uploader.settle(at: 0, with: ok)
 
         waitForUploads(2)
-        expectNoUpload(beyond: 2)
-        XCTAssertEqual(uploader.bodies[1].instantEvents?.compactMap(\.insertId), ["warmup", "start"])
-        XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["stop"])
+        withExtendedLifetime(tracker) { expectNoUpload(beyond: 2) }
+        XCTAssertEqual(uploader.bodies[1].instantEvents?.compactMap(\.insertId), ["start"])
+        XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["warmup", "stop"])
         XCTAssertEqual(uploader.bodies[1].timeout, 1_234)
     }
 
@@ -81,7 +87,8 @@ final class DelayedEventTrackerTests: XCTestCase {
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].timeout, 1_234)
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["d"])
-        XCTAssertEqual(uploader.bodies[1].instantEvents?.compactMap(\.insertId), ["i"])
+        // "i" settled with the first request, so it is not carried a second time.
+        XCTAssertNil(uploader.bodies[1].instantEvents)
     }
 
     // MARK: - instant events (track)
@@ -95,10 +102,10 @@ final class DelayedEventTrackerTests: XCTestCase {
     }
 
     private func assertInstantDropped(settlingWith result: Result<DelayedResponseBody, Error>) {
+        uploader.autoSettle = result
         let tracker = makeTracker()
         tracker.track(makeEvent("i"))
         waitForUploads(1)
-        uploader.settle(at: 0, with: result)
 
         tracker.trackDelayed(makeEvent("d"))
         waitForUploads(2)
@@ -110,9 +117,8 @@ final class DelayedEventTrackerTests: XCTestCase {
         let tracker = makeTracker(pulseInterval: 0.05)
         tracker.trackDelayed(makeEvent("d"))
         waitForUploads(1)
-        uploader.settle(at: 0, with: .success(DelayedResponseBody(id: "d", expiration: 1, flushed: nil)))
 
-        waitForUploads(2)
+        withExtendedLifetime(tracker) { waitForUploads(2) }
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["d"])
     }
 
@@ -235,6 +241,7 @@ final class DelayedEventTrackerTests: XCTestCase {
     }
 
     private func assertFlushDropsEntries(settlingWith result: Result<DelayedResponseBody, Error>) {
+        uploader.autoSettle = result
         let tracker = makeTracker(delayTimeoutMs: 1_234)
         tracker.trackDelayed(makeEvent("a"))
         waitForUploads(1)
@@ -245,7 +252,6 @@ final class DelayedEventTrackerTests: XCTestCase {
         waitForUploads(3)
         XCTAssertEqual(uploader.bodies[2].timeout, 0)
         XCTAssertEqual(uploader.bodies[2].events.compactMap(\.insertId), ["a", "b"])
-        uploader.settle(at: 2, with: result)
 
         tracker.trackDelayed(makeEvent("c"))
         waitForUploads(4)
@@ -254,46 +260,110 @@ final class DelayedEventTrackerTests: XCTestCase {
     }
 
     func testFlushKeepsEntriesUntilTheRequestSettles() {
+        uploader.autoSettle = nil
         let tracker = makeTracker()
         tracker.trackDelayed(makeEvent("a"))
         waitForUploads(1)
+        uploader.settle(at: 0, with: ok)
+
         tracker.flush()
         waitForUploads(2)
-
+        // "a" is still local while the flush is in flight, so a track landing now is held
+        // rather than sent beside it — and rides the request issued once the flush settles.
         tracker.trackDelayed(makeEvent("b"))
+        withExtendedLifetime(tracker) { expectNoUpload(beyond: 2) }
+
+        uploader.settle(at: 1, with: ok)
         waitForUploads(3)
-        XCTAssertEqual(uploader.bodies[2].events.compactMap(\.insertId), ["a", "b"])
+        // "a" left with the flush; only "b" is still live.
+        XCTAssertEqual(uploader.bodies[2].events.compactMap(\.insertId), ["b"])
     }
 
     func testFlushSuspendsPulseWhileTheRequestIsInFlight() {
+        uploader.autoSettle = nil
         let tracker = makeTracker(pulseInterval: 0.05)
         tracker.trackDelayed(makeEvent("a"))
         waitForUploads(1)
+        uploader.settle(at: 0, with: ok)
 
         tracker.flush()
         waitForUploads(2)
         // The flush is never settled, so "a" is still local; a live pulse
         // would re-upsert the row the server already ingested and deleted.
-        expectNoUpload(beyond: 2, timeout: 0.3)
+        withExtendedLifetime(tracker) { expectNoUpload(beyond: 2, timeout: 0.3) }
     }
 
     func testUpdateDuringInFlightFlushDoesNotResumeThePulse() {
+        uploader.autoSettle = nil
         let tracker = makeTracker(pulseInterval: 0.05)
         tracker.trackDelayed(makeEvent("a", type: "First"))
         waitForUploads(1)
+        uploader.settle(at: 0, with: ok)
 
         tracker.flush()
         waitForUploads(2)
         // The flush is never settled, so "a" is still local; an update on it must not
         // restart the pulse the flush suspended, or it would re-upsert the deleted row.
         tracker.update(makeEvent("a", type: "Second"))
-        expectNoUpload(beyond: 2, timeout: 0.3)
+        withExtendedLifetime(tracker) { expectNoUpload(beyond: 2, timeout: 0.3) }
     }
 
     func testFlushOnEmptySetSendsNothing() {
         let tracker = makeTracker()
         tracker.flush()
         expectNoUpload(beyond: 0)
+    }
+
+    // MARK: - request serialization
+
+    func testSendWaitsForTheInFlightRequestAndCoalesces() {
+        uploader.autoSettle = nil
+        let tracker = makeTracker()
+        tracker.trackDelayed(makeEvent("a"))
+        waitForUploads(1)
+
+        // Every body fully replaces the same server row, so a second request racing this one
+        // could land first and restore stale state.
+        tracker.trackDelayed(makeEvent("b"))
+        tracker.trackDelayed(makeEvent("c"))
+        withExtendedLifetime(tracker) { expectNoUpload(beyond: 1) }
+
+        uploader.settle(at: 0, with: ok)
+        waitForUploads(2)
+        withExtendedLifetime(tracker) { expectNoUpload(beyond: 2) }
+        // One request, carrying state as of when it was issued rather than when it was owed.
+        XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["a", "b", "c"])
+    }
+
+    func testFlushIsSentOnlyAfterTheInFlightRequestSettles() {
+        uploader.autoSettle = nil
+        let tracker = makeTracker(delayTimeoutMs: 1_234)
+        tracker.trackDelayed(makeEvent("a"))
+        waitForUploads(1)
+
+        // A slower request racing the flush could re-upsert the row the flush had the server
+        // ingest and delete, leaving it to be ingested a second time at TTL.
+        tracker.flush()
+        withExtendedLifetime(tracker) { expectNoUpload(beyond: 1) }
+
+        uploader.settle(at: 0, with: ok)
+        waitForUploads(2)
+        XCTAssertEqual(uploader.bodies[1].timeout, 0)
+        XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["a"])
+    }
+
+    func testUpdateDuringAnInFlightRequestRidesTheOwedSend() {
+        uploader.autoSettle = nil
+        let tracker = makeTracker()
+        tracker.trackDelayed(makeEvent("a", type: "First"))
+        waitForUploads(1)
+
+        tracker.trackDelayed(makeEvent("b"))       // owes a send, held by the gate
+        tracker.update(makeEvent("a", type: "Second"))
+
+        uploader.settle(at: 0, with: ok)
+        waitForUploads(2)
+        XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second", "Content Playing"])
     }
 
     // MARK: - discard / empty state
@@ -380,7 +450,11 @@ final class FakeDelayedEventsUploader: DelayedEventsUploading {
     private var recorded: [(body: DelayedRequestBody, completion: Completion)] = []
     private var pending: (count: Int, notify: () -> Void)?
     private var pendingPredicate: (matches: (DelayedRequestBody) -> Bool, notify: () -> Void)?
-    private var uploadGate: DispatchSemaphore?
+
+    /// Settles every upload with this result as it is issued, modelling a fast, healthy network.
+    /// The tracker sends one request at a time, so a test that never settles blocks all later
+    /// sends; tests that want a request to stay in flight clear this and drive `settle(at:)`.
+    var autoSettle: Result<DelayedResponseBody, Error>?
 
     var bodies: [DelayedRequestBody] { lock.withLock { recorded.map(\.body) } }
 
@@ -412,17 +486,9 @@ final class FakeDelayedEventsUploader: DelayedEventsUploading {
         completion(result)
     }
 
-    /// Makes the next upload block the tracker's queue (uploads run on it) after being recorded,
-    /// until the returned closure runs — with a 10s escape so a failed test cannot hang the queue.
-    func holdNextUpload() -> () -> Void {
-        let gate = DispatchSemaphore(value: 0)
-        lock.withLock { uploadGate = gate }
-        return { gate.signal() }
-    }
-
     @discardableResult
     func upload(_ body: DelayedRequestBody, completion: @escaping Completion) -> URLSessionDataTask? {
-        let notifications: [() -> Void] = lock.withLock {
+        let (notifications, settleWith): ([() -> Void], Result<DelayedResponseBody, Error>?) = lock.withLock {
             recorded.append((body, completion))
             var fired: [() -> Void] = []
             if let pending, recorded.count >= pending.count {
@@ -433,14 +499,12 @@ final class FakeDelayedEventsUploader: DelayedEventsUploading {
                 self.pendingPredicate = nil
                 fired.append(pendingPredicate.notify)
             }
-            return fired
+            return (fired, autoSettle)
         }
         notifications.forEach { $0() }
-        let gate: DispatchSemaphore? = lock.withLock {
-            defer { uploadGate = nil }
-            return uploadGate
-        }
-        _ = gate?.wait(timeout: .now() + 10)
+        // The tracker sets its in-flight flag before calling us, so settling here (on its queue)
+        // just enqueues the completion hop — it cannot re-enter `send` underneath itself.
+        if let settleWith { completion(settleWith) }
         return nil
     }
 }
