@@ -2,9 +2,8 @@ import AmplitudeSwift
 import Foundation
 
 /// Keeps delayed events alive on the ingestion server until they are finalized.
-/// Every request is a full-replace upsert of one server row, so each send carries the
-/// complete live set. A tracked event must not be mutated after being handed over;
-/// to refresh a snapshot, pass a fresh `BaseEvent` with the same `insertId` to `update(_:)`.
+/// Every request is a full-replace upsert of one server row, so each send carries the complete
+/// live set. A tracked event must not be mutated after being handed over; refresh via `update(_:)`.
 final class DelayedEventTracker {
     private let configuration: Configuration
     private let httpClient: DelayedEventsUploading
@@ -16,13 +15,9 @@ final class DelayedEventTracker {
     private var delayId = UUID().uuidString
     private var entries = OrderedEntries()
 
-    // Only one request is ever in flight. Every body fully replaces the same server row, so
-    // overlapping requests can land out of order and restore stale state — and one still in
-    // flight when `flush()` runs could recreate the row the flush had the server delete.
-    // While a request is in flight the tracker only records what the next one must do;
-    // its completion issues it. There is never a backlog: the newest state supersedes.
-    private var needsSend = false      // a request is owed: entries changed, or the pulse came due
-    private var needsFlush = false     // `flush()` asked for ingestion: next request carries `timeout: 0`
+    // One request at a time: bodies fully replace the same row, so overlapping ones can land out of order.
+    private var needsSend = false
+    private var needsFlush = false
     private var requestInFlight = false
     private var timer: PulseTimer!
 
@@ -34,9 +29,8 @@ final class DelayedEventTracker {
         self.httpClient = httpClient
         self.logger = configuration.loggerProvider
         self.delayTimeoutMs = delayTimeoutMs
-        // The handler runs on `queue` — `PulseTimer` schedules its source there.
         timer = PulseTimer(interval: pulseInterval, queue: queue) { [weak self] in
-            self?.setNeedsSend()  // re-send the live set so the server keeps pushing its TTL out
+            self?.setNeedsSend()
         }
     }
 
@@ -60,8 +54,7 @@ final class DelayedEventTracker {
 
     func flush() {
         queue.async {
-            // Entries stay local until the request settles; suspend the pulse so it cannot
-            // re-upsert the row the server is deleting.
+            // The pulse would re-upsert the row this request has the server delete.
             self.timer.suspend()
             self.needsFlush = true
             self.sendPendingRequest()
@@ -94,22 +87,17 @@ final class DelayedEventTracker {
         }
     }
 
-    /// Records that a request is owed, and sends it on the next queue hop — so several tracks
-    /// landing in the same tick share one request instead of each issuing their own.
+    /// Deferred by a hop so tracks landing in the same tick share one request.
     private func setNeedsSend() {
-        guard !needsSend else { return }  // a hop is already pending, and will see this change too
+        guard !needsSend else { return }
         needsSend = true
         queue.async { self.sendPendingRequest() }
     }
 
-    /// The one place a request is issued. Sends whatever the tracker currently owes, unless
-    /// a request is already in flight — in which case that request's completion calls back
-    /// here and sends it then.
     private func sendPendingRequest() {
-        guard needsSend || needsFlush, !entries.isEmpty else { return }  // nothing to say
-        guard !requestInFlight else { return }  // say it when the wire is free; the completion calls back
-        // A flush outranks a plain send: it is the request that has the server ingest the row
-        // and delete it, so letting a plain send go in its place would drop the ingestion.
+        guard needsSend || needsFlush, !entries.isEmpty else { return }
+        guard !requestInFlight else { return }
+        // A flush outranks a plain send: only it has the server ingest the row and delete it.
         let flushing = needsFlush
         needsSend = false
         needsFlush = false
@@ -117,16 +105,12 @@ final class DelayedEventTracker {
     }
 
     private func send(flushing: Bool) {
-        // Built now rather than when the send was first owed, so a request deferred behind an
-        // in-flight one carries current state instead of a stale snapshot.
         let (body, settledIds) = makeRequestBody(flushing: flushing)
         requestInFlight = true
         // TODO: retry failed uploads with backoff.
         // TODO: persist entries so in-flight events survive process death.
-        // TODO: buffer changes and send on a size or time threshold, rather than a request per
-        //       change with the pulse as the only other trigger. Sending as soon as state changes
-        //       is deliberate for now — it keeps the server-side integration simple to land and
-        //       verify; persistence would double as that buffer.
+        // TODO: buffer changes and send on a size or time threshold; sending per change is a
+        //       staging choice while the server-side integration is being landed.
         httpClient.upload(body) { [weak self] result in
             guard let self else { return }
             if case .failure(let error) = result {
@@ -137,7 +121,7 @@ final class DelayedEventTracker {
                 // Settled entries leave the set whether the request succeeded or not.
                 settledIds.forEach { self.entries.remove($0) }
                 self.suspendPulseIfIdle()
-                self.sendPendingRequest()  // anything that accumulated while this was in flight
+                self.sendPendingRequest()
             }
         }
     }

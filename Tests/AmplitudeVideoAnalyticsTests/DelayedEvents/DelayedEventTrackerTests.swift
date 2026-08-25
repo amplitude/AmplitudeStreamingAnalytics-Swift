@@ -44,8 +44,7 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testTrackAndTrackDelayedCoalesceIntoOneUpload() {
         let tracker = makeTracker(delayTimeoutMs: 1_234)
-        // Keep an unrelated request in flight so both tracks below are provably enqueued
-        // before the tracker can issue anything for them.
+        // An in-flight request holds both tracks below until they can share one.
         uploader.autoSettle = nil
         tracker.trackDelayed(makeEvent("warmup"))
         waitForUploads(1)
@@ -268,8 +267,7 @@ final class DelayedEventTrackerTests: XCTestCase {
 
         tracker.flush()
         waitForUploads(2)
-        // "a" is still local while the flush is in flight, so a track landing now is held
-        // rather than sent beside it — and rides the request issued once the flush settles.
+        // Held rather than sent beside the flush; it rides the request issued once that settles.
         tracker.trackDelayed(makeEvent("b"))
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 2) }
 
@@ -322,8 +320,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         tracker.trackDelayed(makeEvent("a"))
         waitForUploads(1)
 
-        // Every body fully replaces the same server row, so a second request racing this one
-        // could land first and restore stale state.
+        // A second request racing this one could land first and restore stale state.
         tracker.trackDelayed(makeEvent("b"))
         tracker.trackDelayed(makeEvent("c"))
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 1) }
@@ -331,7 +328,6 @@ final class DelayedEventTrackerTests: XCTestCase {
         uploader.settle(at: 0, with: ok)
         waitForUploads(2)
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 2) }
-        // One request, carrying state as of when it was issued rather than when it was owed.
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["a", "b", "c"])
     }
 
@@ -341,8 +337,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         tracker.trackDelayed(makeEvent("a"))
         waitForUploads(1)
 
-        // A slower request racing the flush could re-upsert the row the flush had the server
-        // ingest and delete, leaving it to be ingested a second time at TTL.
+        // A slower request landing after the flush would recreate the row it had deleted.
         tracker.flush()
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 1) }
 
@@ -451,9 +446,8 @@ final class FakeDelayedEventsUploader: DelayedEventsUploading {
     private var pending: (count: Int, notify: () -> Void)?
     private var pendingPredicate: (matches: (DelayedRequestBody) -> Bool, notify: () -> Void)?
 
-    /// Settles every upload with this result as it is issued, modelling a fast, healthy network.
-    /// The tracker sends one request at a time, so a test that never settles blocks all later
-    /// sends; tests that want a request to stay in flight clear this and drive `settle(at:)`.
+    /// Settles each upload as it is issued. The tracker sends one request at a time, so tests
+    /// that want one left in flight clear this and drive `settle(at:)` themselves.
     var autoSettle: Result<DelayedResponseBody, Error>?
 
     var bodies: [DelayedRequestBody] { lock.withLock { recorded.map(\.body) } }
