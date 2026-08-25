@@ -11,19 +11,19 @@ final class DelayedEventTracker {
     private let logger: (any Logger)?
     private let delayTimeoutMs: Int64
 
-    /// A send that is owed but not yet on the wire. At most one can be outstanding:
-    /// every request fully replaces the server row, so a deferred send is a debt, not a queue.
-    private enum Pending {
-        case send
-        case flush
-    }
-
     // All mutable state is confined to this serial queue; HTTP completions hop back onto it.
     private let queue = DispatchQueue(label: "com.amplitude.delayedEventTracker")
     private var delayId = UUID().uuidString
     private var entries = OrderedEntries()
-    private var pending: Pending?
-    private var uploading = false
+
+    // Only one request is ever in flight. Every body fully replaces the same server row, so
+    // overlapping requests can land out of order and restore stale state — and one still in
+    // flight when `flush()` runs could recreate the row the flush had the server delete.
+    // While a request is in flight the tracker only records what the next one must do;
+    // its completion issues it. There is never a backlog: the newest state supersedes.
+    private var needsSend = false      // a request is owed: entries changed, or the pulse came due
+    private var needsFlush = false     // `flush()` asked for ingestion: next request carries `timeout: 0`
+    private var requestInFlight = false
     private var timer: PulseTimer!
 
     init(configuration: Configuration,
@@ -34,8 +34,9 @@ final class DelayedEventTracker {
         self.httpClient = httpClient
         self.logger = configuration.loggerProvider
         self.delayTimeoutMs = delayTimeoutMs
+        // The handler runs on `queue` — `PulseTimer` schedules its source there.
         timer = PulseTimer(interval: pulseInterval, queue: queue) { [weak self] in
-            self?.sendNow(.send)
+            self?.setNeedsSend()  // re-send the live set so the server keeps pushing its TTL out
         }
     }
 
@@ -60,10 +61,10 @@ final class DelayedEventTracker {
     func flush() {
         queue.async {
             // Entries stay local until the request settles; suspend the pulse so it cannot
-            // re-upsert the row the server is deleting. A queued plain send is upgraded to
-            // this flush rather than sent alongside it.
+            // re-upsert the row the server is deleting.
             self.timer.suspend()
-            self.sendNow(.flush)
+            self.needsFlush = true
+            self.sendPendingRequest()
         }
     }
 
@@ -72,7 +73,8 @@ final class DelayedEventTracker {
         queue.async {
             self.entries.removeAll()
             self.delayId = UUID().uuidString
-            self.pending = nil
+            self.needsSend = false
+            self.needsFlush = false
             self.timer.suspend()
         }
     }
@@ -83,7 +85,7 @@ final class DelayedEventTracker {
             if let entry = self.admissibleEntry(event, kind: kind, insertId: insertId) {
                 self.entries.upsert(entry, for: insertId)
                 self.timer.resume()
-                self.scheduleSend()
+                self.setNeedsSend()
             } else {
                 // A rejected add also evicts any queued entry under the same id.
                 self.entries.remove(insertId)
@@ -92,34 +94,32 @@ final class DelayedEventTracker {
         }
     }
 
-    /// Records a send owed by an add. Adds landing before the hop runs share the one request.
-    private func scheduleSend() {
-        guard pending == nil else { return }  // an owed flush is never downgraded to a plain send
-        pending = .send
-        queue.async { self.drain() }
+    /// Records that a request is owed, and sends it on the next queue hop — so several tracks
+    /// landing in the same tick share one request instead of each issuing their own.
+    private func setNeedsSend() {
+        guard !needsSend else { return }  // a hop is already pending, and will see this change too
+        needsSend = true
+        queue.async { self.sendPendingRequest() }
     }
 
-    /// Records a send owed by the pulse or by `flush()`, and pays it at once if the gate is open.
-    private func sendNow(_ kind: Pending) {
-        if kind == .flush || pending == nil { pending = kind }
-        drain()
-    }
-
-    /// Issues the owed send, unless a request is already in flight — every body fully replaces
-    /// the same server row, so overlapping requests can land out of order and restore stale
-    /// state. The debt is paid instead by the in-flight request's completion.
-    private func drain() {
-        guard !uploading, let kind = pending else { return }
-        pending = nil
-        send(flushing: kind == .flush)
+    /// The one place a request is issued. Sends whatever the tracker currently owes, unless
+    /// a request is already in flight — in which case that request's completion calls back
+    /// here and sends it then.
+    private func sendPendingRequest() {
+        guard !requestInFlight, needsSend || needsFlush, !entries.isEmpty else { return }
+        // A flush outranks a plain send: it is the request that has the server ingest the row
+        // and delete it, so letting a plain send go in its place would drop the ingestion.
+        let flushing = needsFlush
+        needsSend = false
+        needsFlush = false
+        send(flushing: flushing)
     }
 
     private func send(flushing: Bool) {
-        guard !entries.isEmpty else { return }
-        // Built here rather than when the send was owed, so a deferred request carries
-        // current state instead of the snapshot as of the moment it was requested.
+        // Built now rather than when the send was first owed, so a request deferred behind an
+        // in-flight one carries current state instead of a stale snapshot.
         let (body, settledIds) = makeRequestBody(flushing: flushing)
-        uploading = true
+        requestInFlight = true
         // TODO: retry failed uploads with backoff.
         // TODO: persist entries so in-flight events survive process death.
         httpClient.upload(body) { [weak self] result in
@@ -128,11 +128,11 @@ final class DelayedEventTracker {
                 self.logger?.error(message: "DelayedEventTracker: delayed events request failed: \(error)")
             }
             self.queue.async {
-                self.uploading = false
+                self.requestInFlight = false
                 // Settled entries leave the set whether the request succeeded or not.
                 settledIds.forEach { self.entries.remove($0) }
                 self.suspendPulseIfIdle()
-                self.drain()
+                self.sendPendingRequest()  // anything that accumulated while this was in flight
             }
         }
     }
