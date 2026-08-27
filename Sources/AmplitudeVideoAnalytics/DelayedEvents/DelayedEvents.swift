@@ -3,15 +3,16 @@ import Foundation
 
 /// Entry point onto the delayed transport. Tracked events take a round trip through the host
 /// timeline, so they carry the same identity and context enrichment as any other event.
+///
+/// A tracked event must not be mutated after being handed over, matching the tracker's own
+/// contract: the marker is not copied again on the way out.
 final class DelayedEvents {
     private weak var amplitude: Amplitude?
     private let tracker: DelayedEventTracker
-    private let logger: (any Logger)?
 
     init(amplitude: Amplitude, httpClient: DelayedEventsUploading? = nil) {
         let configuration = amplitude.configuration
         self.amplitude = amplitude
-        self.logger = configuration.loggerProvider
         self.tracker = DelayedEventTracker(
             configuration: configuration,
             httpClient: httpClient ?? DelayedEventsHttpClient(configuration: configuration))
@@ -38,21 +39,12 @@ final class DelayedEvents {
         tracker.discard()
     }
 
+    /// Swallowing the marker ends the timeline's interest in it, so the enriched instance is
+    /// handed straight over; `kind` is outside `CodingKeys` and never reaches the wire.
     private func route(_ event: BaseEvent, kind: DelayedMarkerEvent.Kind) {
-        guard let handover = plainCopy(of: event) else {
-            logger?.warn(message: "DelayedEvents: cannot encode event, dropping id=\(event.insertId ?? "nil")")
-            return
-        }
         switch kind {
-        case .instant: tracker.track(handover)
-        case .delayed: tracker.trackDelayed(handover)
+        case .instant: tracker.track(event)
+        case .delayed: tracker.trackDelayed(event)
         }
-    }
-
-    /// The timeline goes on mutating the instance it enriched, and the tracker may encode what it
-    /// is handed on its own queue. A decoded copy severs that aliasing, and sheds the marker.
-    private func plainCopy(of event: BaseEvent) -> BaseEvent? {
-        guard let data = try? JSONEncoder().encode(event) else { return nil }
-        return try? JSONDecoder().decode(BaseEvent.self, from: data)
     }
 }

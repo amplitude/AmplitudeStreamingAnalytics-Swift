@@ -96,10 +96,11 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertEqual(sent.timestamp, 1_752_000_000_000, "client stamp must survive the timeline")
         XCTAssertNotNil(sent.deviceId, "identity stamped by the timeline")
         XCTAssertNotNil(sent.platform, "ContextPlugin enrichment must reach the interceptor")
-        XCTAssertFalse(sent is DelayedMarkerEvent, "stored as a plain BaseEvent")
     }
 
-    func testFacadeHandsOverACopyRatherThanTheTimelinesInstance() {
+    /// The caller's own instance never reaches the transport — the marker wraps a copy of it —
+    /// so a caller that keeps holding its event cannot mutate what is in flight.
+    func testFacadeDoesNotHandOverTheCallersInstance() {
         makeFacade()
         let event = makeEvent("ins-1")
 
@@ -107,6 +108,21 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         waitForUploads(1)
 
         XCTAssertNotIdentical(uploader.bodies[0].events[0], event)
+    }
+
+    /// Swallowing at `.before` short-circuits the rest of the timeline, so `.enrichment` plugins
+    /// never see a delayed event. Web re-tracks heartbeats through its full pipeline and does not
+    /// have this gap — pinned here so a change in plugin type surfaces as a failure.
+    func testDelayedEventsBypassEnrichmentPlugins() {
+        let spy = SpyEnrichmentPlugin()
+        makeFacade(enrichment: spy)
+
+        amplitude.track(event: makeEvent("ins-0", type: "Regular Event"))
+        delayedEvents.trackDelayed(makeEvent("ins-1"))
+        waitForUploads(1)
+
+        XCTAssertTrue(spy.seen.contains("Regular Event"), "the spy must be reached by ordinary events")
+        XCTAssertFalse(spy.seen.contains("Content Stopped"))
     }
 
     func testFacadeTrackRidesTheInstantLane() {
@@ -146,11 +162,14 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     /// Offline and without autocapture, so the host SDK's own uploader and its session events
     /// stay out of the way; only the delayed transport should see traffic.
-    private func makeFacade() {
+    private func makeFacade(enrichment: SpyEnrichmentPlugin? = nil) {
         amplitude = Amplitude(configuration: Configuration(apiKey: "facade-\(UUID().uuidString)",
                                                            instanceName: "facade-\(UUID().uuidString)",
                                                            autocapture: [],
                                                            offline: true))
+        if let enrichment {
+            amplitude.add(plugin: enrichment)
+        }
         delayedEvents = DelayedEvents(amplitude: amplitude, httpClient: uploader)
     }
 
@@ -164,5 +183,18 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         let reached = expectation(description: "\(count) upload(s)")
         uploader.whenUploadCountReaches(count) { reached.fulfill() }
         wait(for: [reached], timeout: timeout)
+    }
+}
+
+/// Records the event types that reach the `.enrichment` stage.
+final class SpyEnrichmentPlugin: EnrichmentPlugin {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+
+    var seen: [String] { lock.withLock { recorded } }
+
+    override func execute(event: BaseEvent) -> BaseEvent? {
+        lock.withLock { recorded.append(event.eventType) }
+        return event
     }
 }

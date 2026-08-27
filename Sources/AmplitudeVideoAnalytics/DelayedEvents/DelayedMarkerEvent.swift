@@ -13,6 +13,9 @@ final class DelayedMarkerEvent: BaseEvent {
     /// markers are built by `init(wrapping:kind:)`, never decoded.
     private(set) var kind: Kind = .delayed
 
+    /// `mergeEventOptions` overlays with `source ?? self`, so it copies wholesale only because a
+    /// fresh event starts out nil; the four assignments after it are the fields `BaseEvent` adds
+    /// over `EventOptions`, which it does not touch.
     convenience init(wrapping event: BaseEvent, kind: Kind) {
         self.init(eventType: event.eventType)
         self.kind = kind
