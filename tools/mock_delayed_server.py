@@ -21,15 +21,18 @@ Endpoints
     ``DelayedEventsHttpClient.getUrl()`` appends ``/delayed``.
 
 ``POST /2/httpapi``
-    Amplitude HTTP V2 ingestion sink. The real servlet forwards ingested events to the
-    event API; here that is internal (see ``_ingest``), and this route exists so the same
-    process can also absorb the SDK's *normal* event uploads. That is what lets a contract
-    test point one ``Configuration(serverUrl:)`` at this server and then assert that no
-    video event reached the normal destination.
+    Amplitude HTTP V2 ingestion sink. **This route does not exist on the real service** --
+    nova maps only ``/2/httpapi/delayed``, ``/healthcheck`` and ``/elbcheck``, and the
+    servlet forwards ingested events to a *different host*
+    (``Config.DELAYED_EVENTS_EVENT_API_URL``, via ``InternalAmplitudeClient``). Collapsing
+    the two into one process is a test-fixture choice: it lets a contract test point one
+    ``Configuration(serverUrl:)`` here and then assert that no video event reached the
+    normal destination. See divergence 8.
 
 ``GET /healthcheck``
-    ``200 {"status": "ok"}``. Mirrors nova's ``/healthcheck``; poll it to know the server
-    is up before starting tests.
+    ``200 {"status": "ok"}``. Nova serves ``/healthcheck`` too, via ``HealthCheckServlet``;
+    its response body has not been checked against this one, so do not assert on the shape.
+    Poll it to know the server is up before starting tests.
 
 ``GET /debug/requests``, ``GET /debug/ingested``, ``GET /debug/state``
     Introspection. Shapes documented below -- these are consumed by the demo app's debug
@@ -71,7 +74,9 @@ Each ``<request>`` is::
       "flush"           timeout == 0 merge-and-ingest
       "delete"          the row was removed
       "ingest_direct"   a POST /2/httpapi upload was absorbed
-      "unhandled"       a bug in this mock; the servlet's catch-all 500 equivalent
+      "unhandled"       a bug in this mock -- an unexpected internal error. NOT set for the
+                        faithful 500s (an uncoercible field type), which are emulation, not
+                        malfunction; if you see this, the mock itself broke.
 
 ``GET /debug/ingested`` -> ``{"count": <int>, "ingested": [<batch>, ...]}``, oldest first.
 Everything that reached the (simulated) event API, one entry per ingest call::
@@ -99,7 +104,9 @@ DynamoDB table. Field names follow ``DelayedEventDao``'s attributes::
       "created_at": 1756312345678,        # epoch ms, if_not_exists -- survives replacement
       "updated_at": 1756312345678,        # epoch ms, last upsert
       "expiration": 1756312350,           # epoch SECONDS, TTL
-      "event_data": { ... }               # the stored body, instant_events stripped
+      "event_data": { ... }               # the stored body; instant_events stripped, but
+                                          # only when the request had a non-empty one --
+                                          # a present-but-empty instant_events survives
     }
 
 Deliberate divergences from the real service
@@ -108,18 +115,36 @@ Deliberate divergences from the real service
     their ``expiration``. Real DynamoDB TTL deletion is best-effort and typically lags by
     minutes -- up to 48 hours -- before the Streams -> Lambda -> SQS -> consumer chain runs.
     Do not write a test that depends on the *latency* of the real thing being small.
-2.  **Ingestion cannot fail.** ``_ingest`` appends to a list, so the servlet's
-    500 ``"Failed to ingest events"`` path is unreachable here. Fault injection is not
-    implemented; add it if Step 3 needs it.
+2.  **Only the catch-all 500 is reachable; four other error paths are not.** ``_ingest``
+    appends to a list and storage cannot fail, so the servlet's 400
+    ``"Failed to read request body"``, 500 ``"Internal error"`` (upsert failure -- note this
+    is a *different* string from the catch-all's ``"Internal server error"``), 500
+    ``"Failed to ingest events"`` and 500 ``"Event ingestion interrupted"`` never occur here.
+    No fault injection is implemented; the upsert-failure path in particular is a live
+    contract branch with a test of its own in nova, so add injection before writing a
+    negative test for it.
 3.  **No zstd, no compression.** ``event_data`` is held as a dict rather than a compressed
-    blob, and requests are not gzip-decoded (the SDK does not gzip delayed requests).
+    blob, and requests are not gzip-decoded (the SDK does not gzip delayed requests). Note
+    the real server installs a Jetty ``GzipHandler``, so its 400,000-byte cap applies to the
+    *decompressed* body.
 4.  **No accounts service.** Any non-empty ``api_key`` is valid unless ``--valid-api-key``
     is passed, in which case anything else gets the servlet's 400 ``"Invalid api_key"``.
-5.  **Throttling is off by default** (``--throttle-gap-seconds 0``). The real default is a
-    1-second gap per ``apiKey:id``, which a pulse-driven client trips constantly.
-6.  **``GET`` on the delayed path returns a JSON 405**, where Jetty's ``HttpServlet``
-    default renders an HTML error page.
+5.  **Throttling is off by default** (``--throttle-gap-seconds 0``), and the kill switch is
+    **on** by default where nova's ``delayed.events.enabled`` defaults to false. The real
+    throttle gap is 1 second per ``apiKey:id``, which a pulse-driven client trips constantly.
+6.  **Unmatched methods and paths answer with JSON**, where Jetty renders HTML: ``GET`` on
+    the delayed path gives a JSON 405, and an unknown path a JSON 404.
 7.  **No CORS filter and no ``/elbcheck``** -- neither matters to a native client.
+8.  **Requests must declare a Content-Length.** ``rfile`` cannot find the end of a body on
+    its own, so a chunked request, or one with no ``Content-Length``, reads as empty and
+    gets 400 ``"Empty request body"``; the real service de-chunks and accepts it. For the
+    same reason an *under*-declared ``Content-Length`` is not caught here. ``URLSession``
+    always sets the header, so this bites hand-built fixtures only. Also in this bucket:
+    ``POST /2/httpapi`` is a fixture-only route (see the endpoint list above).
+9.  **JSON parsing is strict.** ``json.loads`` is RFC 8259; fastjson runs with
+    ``AllowUnQuotedFieldNames``, ``AllowSingleQuotes`` and ``AllowArbitraryCommas``, so a
+    body with single quotes, bare keys or trailing commas is accepted there and 400
+    ``"Invalid JSON"`` here. Again: hand-built fixtures, not ``JSONEncoder`` output.
 
 Everything else is intended to match the servlet exactly, including the error strings, the
 validation order, the ``"code"`` field in success responses, and the fact that ``expiration``
@@ -129,6 +154,7 @@ is omitted when nothing was stored.
 import argparse
 import copy
 import json
+import re
 import signal
 import sys
 import threading
@@ -143,7 +169,8 @@ DEFAULT_MAX_PAYLOAD_BYTES = 400_000
 DELAYED_PATHS = ("/2/httpapi/delayed", "/2/httpapi/delayed/")
 HTTPAPI_PATHS = ("/2/httpapi", "/2/httpapi/")
 
-# AccountsService.ORG_ID_KEY value; the servlet reads it off the api key, we have no accounts.
+# The servlet looks the org id up from the api key via AccountsService; we have no accounts,
+# so rows carry a fixed one. 1 is what nova's own servlet tests use.
 STUB_ORG_ID = 1
 
 
@@ -182,26 +209,39 @@ def cast_to_string(value):
     return json.dumps(value, separators=(",", ":"))
 
 
+# Long.parseLong's grammar, which is stricter than Python's int(): no underscores, no
+# surrounding whitespace, no unicode-digit look-alikes beyond what re's [0-9] matches.
+_JAVA_LONG = re.compile(r"^[+-]?[0-9]+$")
+
+
 def cast_to_long(value):
-    """fastjson JSONObject.getLong: null/absent -> None, numbers and numeric strings cast."""
+    """fastjson TypeUtils.castToLong: null/absent -> None, numbers and numeric strings cast.
+
+    The string branch follows fastjson: "", "null" and "NULL" are None, commas are stripped,
+    and anything else goes through `Long.parseLong`, which is narrower than Python's `int()`.
+    Being *more* permissive than the real endpoint is the dangerous direction — it lets a
+    client that the endpoint would 500 on pass a contract test — so the grammar is pinned.
+
+    Not emulated: fastjson also falls back to scanning ISO-8601 date strings and returning
+    epoch millis, so the real service turns `timeout: "2020-01-01T00:00:00Z"` into a number
+    (then almost certainly 400s on the 24h cap) where this raises.
+    """
     if value is None:
         return None
     if isinstance(value, bool):
+        # Boolean is neither Number nor String to fastjson, so it reaches the throw.
         raise CastError("can not cast to long, value : %s" % value)
     if isinstance(value, int):
         return value
     if isinstance(value, float):
         return int(value)
     if isinstance(value, str):
-        if value == "" or value == "null":
+        if value in ("", "null", "NULL"):
             return None
-        try:
-            return int(value)
-        except ValueError:
-            try:
-                return int(float(value))
-            except ValueError:
-                raise CastError("can not cast to long, value : %s" % value)
+        candidate = value.replace(",", "") if "," in value else value
+        if _JAVA_LONG.match(candidate):
+            return int(candidate)
+        raise CastError("can not cast to long, value : %s" % value)
     raise CastError("can not cast to long, value : %s" % value)
 
 
@@ -222,11 +262,43 @@ def cast_to_array(value):
     raise CastError("can not cast to JSONArray, value : %s" % value)
 
 
+def cast_to_object(value):
+    """fastjson JSONArray.getJSONObject(int): a coercion, not an accessor.
+
+    An object passes, null passes through, a string is re-parsed, and anything else --
+    a number, a bool -- throws (ClassCastException / JSONException in Java). Nothing catches
+    that inside the servlet, so a non-object element of `events` escapes to the catch-all 500.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            raise CastError("can not cast to JSONObject, value : %s" % value)
+        if isinstance(parsed, dict):
+            return parsed
+        raise CastError("can not cast to JSONObject, value : %s" % value)
+    raise CastError("can not cast to JSONObject, value : %s" % value)
+
+
 def resolve_time_placeholders(events, timestamp_ms):
-    """DelayedEventUtils.resolveTimePlaceholders -- mutates in place, exact "$time" only."""
-    for event in events:
-        if isinstance(event, dict) and event.get("time") == "$time":
-            event["time"] = timestamp_ms
+    """DelayedEventUtils.resolveTimePlaceholders -- in place, exact "$time" only.
+
+    Every element goes through `getJSONObject`, so a non-object element raises here rather
+    than being skipped. That is load-bearing: skipping it would let `events: [1]` return 200
+    from this mock where the real service answers 500.
+    """
+    for index, event in enumerate(events):
+        resolved = cast_to_object(event)
+        if resolved is None:
+            continue
+        if resolved is not event:
+            events[index] = resolved
+        if resolved.get("time") == "$time":
+            resolved["time"] = timestamp_ms
 
 
 class MockState:
@@ -352,11 +424,23 @@ class MockState:
         for row in expired:
             event_data = row["event_data"] if isinstance(row["event_data"], dict) else {}
             api_key = cast_to_string(event_data.get("api_key"))
-            events = event_data.get("events")
-            if not api_key or not isinstance(events, list) or not events:
+            try:
+                # getJSONArray, so a stored `events` that is a JSON-array *string* still
+                # ingests -- the consumer re-parses it rather than dropping the row.
+                events = cast_to_array(event_data.get("events"))
+            except CastError:
+                events = None
+            if not api_key or not events:
                 continue
             events = copy.deepcopy(events)
-            resolve_time_placeholders(events, row["updated_at"])
+            try:
+                resolve_time_placeholders(events, row["updated_at"])
+            except CastError as err:
+                # The consumer's catch swallows this and never deletes the SQS message, so
+                # the payload redelivers until the DLQ claims it -- i.e. it is never ingested.
+                sys.stderr.write("ttl ingest dropped for id=%s: %s\n" % (row["delay_id"], err))
+                sys.stderr.flush()
+                continue
             self.ingest(api_key, row["delay_id"], events, "ttl", None)
 
     # -- debug views ------------------------------------------------------------------
@@ -429,7 +513,13 @@ class MockDelayedHandler(BaseHTTPRequestHandler):
 
     def _read_body(self, max_bytes):
         """The servlet's bounded read: at most max_bytes + 1, so an oversized body costs
-        one byte past the cap rather than unbounded heap."""
+        one byte past the cap rather than unbounded heap.
+
+        Unlike the servlet, this one has to trust Content-Length: `rfile` is a raw socket
+        reader with no idea where the body ends, so reading past the declared length would
+        block until the peer closed. That makes the declared length load-bearing here and
+        merely a fast path there -- see divergence 8.
+        """
         raw_length = self.headers.get("Content-Length")
         try:
             declared = int(raw_length) if raw_length is not None else -1
@@ -439,8 +529,7 @@ class MockDelayedHandler(BaseHTTPRequestHandler):
             # The body is left unread, so this connection can no longer be reused.
             self.close_connection = True
             raise ServletError(413, "Payload too large")
-        to_read = min(declared, max_bytes + 1) if declared >= 0 else 0
-        data = self.rfile.read(to_read) if to_read > 0 else b""
+        data = self.rfile.read(declared) if declared > 0 else b""
         if len(data) > max_bytes:
             self.close_connection = True
             raise ServletError(413, "Payload too large")
@@ -629,7 +718,8 @@ class MockDelayedHandler(BaseHTTPRequestHandler):
             self.state.note_action(entry, "upsert")
 
         if has_instant_events:
-            # Reached only if the upsert above succeeded -- the ordering guarantee.
+            # The ordering guarantee: if an upsert was owed, this is reached only because it
+            # succeeded. An instant-only request owes none and still ingests.
             to_ingest = copy.deepcopy(instant_events)
             resolve_time_placeholders(to_ingest, now_ms())
             self.state.ingest(api_key, delay_id, to_ingest, "instant", entry["seq"])
