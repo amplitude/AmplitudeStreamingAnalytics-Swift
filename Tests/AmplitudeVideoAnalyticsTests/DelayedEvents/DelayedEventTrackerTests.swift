@@ -423,6 +423,20 @@ final class DelayedEventTrackerTests: XCTestCase {
         }
     }
 
+    // MARK: - routing by the event's own kind
+
+    func testDelayedEventRoutesToTheLaneItsKindNames() {
+        let tracker = makeTracker()
+        tracker.track(DelayedEvent(wrapping: makeEvent("a"), kind: .delayed))
+        waitForUploads(1)
+        XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["a"])
+        XCTAssertNil(uploader.bodies[0].instantEvents)
+
+        tracker.track(DelayedEvent(wrapping: makeEvent("b"), kind: .instant))
+        waitForUploads(2)
+        XCTAssertEqual(uploader.bodies[1].instantEvents?.compactMap(\.insertId), ["b"])
+    }
+
     // MARK: - helpers
 
     private var oversizedEventType: String {

@@ -34,6 +34,14 @@ final class DelayedEventTracker {
         }
     }
 
+    /// Routes on the event's own kind, so callers state intent where they build the event.
+    func track(_ event: DelayedEvent) {
+        switch event.kind {
+        case .instant: add(event, kind: .instant)
+        case .delayed: add(event, kind: .delayed)
+        }
+    }
+
     func track(_ event: BaseEvent) {
         add(event, kind: .instant)
     }

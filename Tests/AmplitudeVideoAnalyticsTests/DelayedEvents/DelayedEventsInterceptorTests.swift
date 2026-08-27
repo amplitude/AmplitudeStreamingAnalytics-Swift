@@ -24,55 +24,55 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     // MARK: - interceptor plugin
 
-    func testMarkerIsSwallowedAndForwardedWithItsKind() {
-        var intercepted: [(event: BaseEvent, kind: DelayedMarkerEvent.Kind)] = []
-        let plugin = DelayedEventsInterceptorPlugin { intercepted.append(($0, $1)) }
-        let marker = DelayedMarkerEvent(wrapping: makeEvent("a"), kind: .delayed)
+    func testDelayedEventIsSwallowedAndForwarded() {
+        var intercepted: [DelayedEvent] = []
+        let plugin = DelayedEventsInterceptorPlugin { intercepted.append($0) }
+        let delayed = DelayedEvent(wrapping: makeEvent("a"), kind: .delayed)
 
-        XCTAssertNil(plugin.execute(event: marker))
+        XCTAssertNil(plugin.execute(event: delayed))
         XCTAssertEqual(intercepted.count, 1)
         XCTAssertEqual(intercepted.first?.kind, .delayed)
         // The enriched instance itself is forwarded, not a copy taken at wrap time.
-        XCTAssertIdentical(intercepted.first?.event, marker)
+        XCTAssertIdentical(intercepted.first, delayed)
     }
 
-    func testInstantMarkerForwardsTheInstantKind() {
-        var kinds: [DelayedMarkerEvent.Kind] = []
-        let plugin = DelayedEventsInterceptorPlugin { kinds.append($1) }
+    func testInstantEventCarriesTheInstantKind() {
+        var intercepted: [DelayedEvent] = []
+        let plugin = DelayedEventsInterceptorPlugin { intercepted.append($0) }
 
-        XCTAssertNil(plugin.execute(event: DelayedMarkerEvent(wrapping: makeEvent("a"), kind: .instant)))
-        XCTAssertEqual(kinds, [.instant])
+        XCTAssertNil(plugin.execute(event: DelayedEvent(wrapping: makeEvent("a"), kind: .instant)))
+        XCTAssertEqual(intercepted.map(\.kind), [.instant])
     }
 
-    func testNonMarkerEventPassesThroughUntouched() {
-        let plugin = DelayedEventsInterceptorPlugin { _, _ in XCTFail("must not intercept") }
+    func testOrdinaryEventPassesThroughUntouched() {
+        let plugin = DelayedEventsInterceptorPlugin { _ in XCTFail("must not intercept") }
         let event = makeEvent("a", type: "Regular Event")
 
         XCTAssertIdentical(plugin.execute(event: event), event)
     }
 
-    // MARK: - marker event
+    // MARK: - delayed event
 
-    func testMarkerCopiesTheWrappedEventsFields() {
+    func testDelayedEventCopiesTheWrappedEventsFields() {
         let wrapped = makeEvent("ins-1")
         wrapped.timestamp = 1_752_000_000_000
         wrapped.sessionId = 42
         wrapped.eventProperties = ["position": 12.5]
 
-        let marker = DelayedMarkerEvent(wrapping: wrapped, kind: .delayed)
+        let delayed = DelayedEvent(wrapping: wrapped, kind: .delayed)
 
-        XCTAssertEqual(marker.eventType, wrapped.eventType)
-        XCTAssertEqual(marker.insertId, "ins-1")
-        XCTAssertEqual(marker.timestamp, 1_752_000_000_000)
-        XCTAssertEqual(marker.sessionId, 42)
-        XCTAssertEqual(marker.eventProperties?["position"] as? Double, 12.5)
+        XCTAssertEqual(delayed.eventType, wrapped.eventType)
+        XCTAssertEqual(delayed.insertId, "ins-1")
+        XCTAssertEqual(delayed.timestamp, 1_752_000_000_000)
+        XCTAssertEqual(delayed.sessionId, 42)
+        XCTAssertEqual(delayed.eventProperties?["position"] as? Double, 12.5)
     }
 
     /// The routing tag is transport-local: it must never reach the wire.
-    func testMarkerKindIsNotEncoded() throws {
-        let marker = DelayedMarkerEvent(wrapping: makeEvent("a"), kind: .delayed)
+    func testKindIsNotEncoded() throws {
+        let delayed = DelayedEvent(wrapping: makeEvent("a"), kind: .delayed)
 
-        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(marker))
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(delayed))
         let fields = try XCTUnwrap(encoded as? [String: Any])
         XCTAssertNil(fields["kind"])
         XCTAssertEqual(fields["insert_id"] as? String, "a")
@@ -88,7 +88,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         let event = makeEvent("ins-1")
         event.timestamp = 1_752_000_000_000
 
-        delayedEvents.trackDelayed(event)
+        delayedEvents.track(DelayedEvent(wrapping: event, kind: .delayed))
         waitForUploads(1)
 
         let sent = uploader.bodies[0].events[0]
@@ -98,13 +98,13 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertNotNil(sent.platform, "ContextPlugin enrichment must reach the interceptor")
     }
 
-    /// The caller's own instance never reaches the transport — the marker wraps a copy of it —
+    /// The caller's own instance never reaches the transport — the delayed event wraps a copy of it —
     /// so a caller that keeps holding its event cannot mutate what is in flight.
     func testFacadeDoesNotHandOverTheCallersInstance() {
         makeFacade()
         let event = makeEvent("ins-1")
 
-        delayedEvents.trackDelayed(event)
+        delayedEvents.track(DelayedEvent(wrapping: event, kind: .delayed))
         waitForUploads(1)
 
         XCTAssertNotIdentical(uploader.bodies[0].events[0], event)
@@ -118,7 +118,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         makeFacade(enrichment: spy)
 
         amplitude.track(event: makeEvent("ins-0", type: "Regular Event"))
-        delayedEvents.trackDelayed(makeEvent("ins-1"))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed))
         waitForUploads(1)
 
         XCTAssertTrue(spy.seen.contains("Regular Event"), "the spy must be reached by ordinary events")
@@ -128,7 +128,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
     func testFacadeTrackRidesTheInstantLane() {
         makeFacade()
 
-        delayedEvents.track(makeEvent("ins-1"))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .instant))
         waitForUploads(1)
 
         XCTAssertEqual(uploader.bodies[0].instantEvents?.compactMap(\.insertId), ["ins-1"])
@@ -137,7 +137,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     func testFacadeFlushFinalizesTheRow() {
         makeFacade()
-        delayedEvents.trackDelayed(makeEvent("ins-1"))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed))
         waitForUploads(1)
 
         delayedEvents.flush()
@@ -148,11 +148,11 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     func testFacadeDiscardRotatesTheDelayId() {
         makeFacade()
-        delayedEvents.trackDelayed(makeEvent("ins-1"))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed))
         waitForUploads(1)
 
         delayedEvents.discard()
-        delayedEvents.trackDelayed(makeEvent("ins-2"))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-2"), kind: .delayed))
         waitForUploads(2)
 
         XCTAssertNotEqual(uploader.bodies[0].id, uploader.bodies[1].id)

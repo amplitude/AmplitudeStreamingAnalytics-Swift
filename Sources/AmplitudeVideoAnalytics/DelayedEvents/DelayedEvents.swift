@@ -5,7 +5,7 @@ import Foundation
 /// timeline, so they carry the same identity and context enrichment as any other event.
 ///
 /// A tracked event must not be mutated after being handed over, matching the tracker's own
-/// contract: the marker is not copied again on the way out.
+/// contract: the event is not copied again on the way out.
 final class DelayedEvents {
     private weak var amplitude: Amplitude?
     private let tracker: DelayedEventTracker
@@ -16,19 +16,14 @@ final class DelayedEvents {
         self.tracker = DelayedEventTracker(
             configuration: configuration,
             httpClient: httpClient ?? DelayedEventsHttpClient(configuration: configuration))
-        amplitude.add(plugin: DelayedEventsInterceptorPlugin { [weak self] event, kind in
-            self?.route(event, kind: kind)
+        amplitude.add(plugin: DelayedEventsInterceptorPlugin { [weak self] event in
+            self?.tracker.track(event)
         })
     }
 
-    /// Ingested on arrival, in the same request as whatever is currently live.
-    func track(_ event: BaseEvent) {
-        amplitude?.track(event: DelayedMarkerEvent(wrapping: event, kind: .instant))
-    }
-
-    /// Held on the server and kept alive by the pulse until flushed or expired.
-    func trackDelayed(_ event: BaseEvent) {
-        amplitude?.track(event: DelayedMarkerEvent(wrapping: event, kind: .delayed))
+    /// The event's own `kind` decides its lane; the tracker routes on it once enriched.
+    func track(_ event: DelayedEvent) {
+        amplitude?.track(event: event)
     }
 
     func flush() {
@@ -37,14 +32,5 @@ final class DelayedEvents {
 
     func discard() {
         tracker.discard()
-    }
-
-    /// Swallowing the marker ends the timeline's interest in it, so the enriched instance is
-    /// handed straight over; `kind` is outside `CodingKeys` and never reaches the wire.
-    private func route(_ event: BaseEvent, kind: DelayedMarkerEvent.Kind) {
-        switch kind {
-        case .instant: tracker.track(event)
-        case .delayed: tracker.trackDelayed(event)
-        }
     }
 }
