@@ -42,6 +42,8 @@ Endpoints
 Debug payload shapes
 --------------------
 ``GET /debug/requests`` -> ``{"count": <int>, "requests": [<request>, ...]}``, oldest first.
+Only *completed* requests appear: a poller must never see a half-written entry, so an
+in-flight request is absent rather than present with a null ``status``.
 
 Each ``<request>`` is::
 
@@ -360,8 +362,15 @@ class MockState:
     # -- debug views ------------------------------------------------------------------
 
     def snapshot_requests(self):
+        """Completed requests only.
+
+        An entry is created when a request arrives and filled in when it is answered, so
+        publishing in-flight ones would hand a poller a half-written record with a null
+        `status`. Consumers poll this endpoint, so that must never be observable.
+        """
         with self._lock:
-            return {"count": len(self._requests), "requests": copy.deepcopy(self._requests)}
+            done = [entry for entry in self._requests if entry["status"] is not None]
+            return {"count": len(done), "requests": copy.deepcopy(done)}
 
     def snapshot_ingested(self):
         with self._lock:
