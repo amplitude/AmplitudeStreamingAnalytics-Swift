@@ -66,9 +66,7 @@ final class DelayedEventTracker {
         queue.async {
             self.entries.removeAll()
             self.delayId = UUID().uuidString
-            self.needsSend = false
-            self.needsFlush = false
-            self.timer.suspend()
+            self.reset()
         }
     }
 
@@ -95,13 +93,23 @@ final class DelayedEventTracker {
     }
 
     private func sendPendingRequest() {
-        guard needsSend || needsFlush, !entries.isEmpty else { return }
         guard !requestInFlight else { return }
+        guard !entries.isEmpty else {
+            reset()
+            return
+        }
+        guard needsSend || needsFlush else { return }
         // A flush outranks a plain send: only it has the server ingest the row and delete it.
         let flushing = needsFlush
         needsSend = false
         needsFlush = false
         send(flushing: flushing)
+    }
+
+    private func reset() {
+        needsSend = false
+        needsFlush = false
+        timer.suspend()
     }
 
     private func send(flushing: Bool) {

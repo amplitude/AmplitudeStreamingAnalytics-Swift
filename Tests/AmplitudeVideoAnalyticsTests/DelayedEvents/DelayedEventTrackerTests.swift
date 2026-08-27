@@ -306,6 +306,35 @@ final class DelayedEventTrackerTests: XCTestCase {
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 2, timeout: 0.3) }
     }
 
+    func testFlushOnEmptySetDoesNotFinalizeALaterEvent() {
+        let tracker = makeTracker(delayTimeoutMs: 1_234)
+        tracker.flush()
+        expectNoUpload(beyond: 0)
+
+        tracker.trackDelayed(makeEvent("a"))
+        waitForUploads(1)
+        XCTAssertEqual(uploader.bodies[0].timeout, 1_234)
+        XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["a"])
+    }
+
+    func testDeferredFlushIsDroppedWhenTheEarlierOneDrainsEverything() {
+        uploader.autoSettle = nil
+        let tracker = makeTracker(delayTimeoutMs: 1_234)
+        tracker.trackDelayed(makeEvent("a"))
+        waitForUploads(1)
+        uploader.settle(at: 0, with: ok)
+
+        tracker.flush()
+        waitForUploads(2)
+        tracker.flush()
+        uploader.settle(at: 1, with: ok)
+
+        tracker.trackDelayed(makeEvent("b"))
+        waitForUploads(3)
+        XCTAssertEqual(uploader.bodies[2].timeout, 1_234)
+        XCTAssertEqual(uploader.bodies[2].events.compactMap(\.insertId), ["b"])
+    }
+
     func testFlushOnEmptySetSendsNothing() {
         let tracker = makeTracker()
         tracker.flush()
