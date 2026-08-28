@@ -1,15 +1,16 @@
 import Foundation
 import XCTest
 
-/// Swift-side view of `tools/mock_delayed_server.py`'s debug API — what the server *did*,
-/// as opposed to what the SDK believes it sent.
+/// Swift-side view of `tools/mock_delayed_server.py`'s debug API — what the server *saw*, as
+/// opposed to what the SDK believes it sent.
 ///
 /// Everything here is synchronous on purpose: a contract test drives the tracker, waits for
 /// the server to have observed something, and asserts. The waits poll rather than subscribe,
 /// because the mock has no push channel and the alternative (sleep-then-assert) is flakier.
 ///
-/// Shapes follow the mock's documented debug payloads; see its module docstring. They are a
-/// published interface over there, so a rename on either side should break loudly here.
+/// Shapes follow the mock's documented debug payloads; see its module docstring. The request
+/// log is a published interface over there, so a rename on either side should break loudly
+/// here.
 struct MockDelayedServer {
     static let defaultBaseUrl = URL(string: "http://127.0.0.1:8123")!
 
@@ -38,19 +39,42 @@ struct MockDelayedServer {
     }
 
     func reset() throws {
-        _ = try request(method: "POST", path: "/debug/reset", as: ResetResponse.self)
+        _ = try send(method: "POST", path: "/debug/reset", body: nil, as: ResetResponse.self)
     }
 
+    /// `GET /debug/requests` — the request log, oldest first, completed requests only.
+    /// **This is where assertions belong.**
     func requests() throws -> [Request] {
         try get("/debug/requests", as: RequestLog.self).requests
     }
 
-    func ingested() throws -> [IngestBatch] {
-        try get("/debug/ingested", as: IngestLog.self).ingested
+    /// `GET /debug/state` — the payloads the mock is holding.
+    ///
+    /// Exposed for parity with the mock's surface (the demo app's debug panel reads it), and
+    /// deliberately *not* used by any assertion: the mock documents this as a convenience for
+    /// a human watching the demo app, not a model of backend storage. Asserting on it would be
+    /// testing the fixture. What the SDK controls is in `requests()`.
+    func state() throws -> StateSnapshot {
+        try get("/debug/state", as: StateSnapshot.self)
     }
 
-    func rows() throws -> [Row] {
-        try get("/debug/state", as: StateSnapshot.self).rows
+    // MARK: - Scripted responses
+
+    /// Queues responses for subsequent `POST /2/httpapi/delayed` requests, consumed one per
+    /// request in order; normal behaviour resumes once the queue drains.
+    ///
+    /// Validation runs *before* the queue is consumed, so a scripted failure still proves the
+    /// body that provoked it was one the endpoint accepts.
+    @discardableResult
+    func queueScript(_ responses: [ScriptedResponse]) throws -> Int {
+        let payload = try JSONEncoder().encode(ScriptRequest(queue: responses))
+        return try send(method: "POST", path: "/debug/script", body: payload,
+                        as: ScriptQueuedResponse.self).queued
+    }
+
+    /// `GET /debug/script` — the entries still queued, verbatim as they were posted.
+    func pendingScript() throws -> [[String: JSONValue]] {
+        try get("/debug/script", as: ScriptSnapshot.self).queue
     }
 
     // MARK: - Waits
@@ -64,22 +88,37 @@ struct MockDelayedServer {
         }
     }
 
+    /// Waits for the first logged request matching `matches`.
+    ///
+    /// Prefer this over indexing `waitForRequests(n)` whenever the request count is not fully
+    /// determined by the SDK. Two tracks landing in the same tick may coalesce into one request
+    /// (the tracker defers each send by a queue hop), and `URLSession` transparently re-sends a
+    /// request when a pooled connection dies before any response bytes arrive — so a scripted
+    /// hang-up can show up at the server twice for one tracker send. Matching on contents is
+    /// immune to both; matching on an index is not.
     @discardableResult
-    func waitForIngested(_ count: Int, timeout: TimeInterval = 5,
-                         file: StaticString = #filePath, line: UInt = #line) throws -> [IngestBatch] {
-        try waitFor("\(count) ingest batch(es)", timeout: timeout, file: file, line: line) {
-            let observed = try ingested()
-            return observed.count >= count ? observed : nil
+    func waitForRequest(_ description: String, timeout: TimeInterval = 5,
+                        file: StaticString = #filePath, line: UInt = #line,
+                        matching matches: (Request) -> Bool) throws -> Request {
+        try waitFor(description, timeout: timeout, file: file, line: line) {
+            try requests().first(where: matches)
         }
     }
 
-    @discardableResult
-    func waitForRows(_ count: Int, timeout: TimeInterval = 5,
-                     file: StaticString = #filePath, line: UInt = #line) throws -> [Row] {
-        try waitFor("\(count) stored row(s)", timeout: timeout, file: file, line: line) {
-            let observed = try rows()
-            return observed.count == count ? observed : nil
-        }
+    /// Asserts the log stays at `count` entries for `settleFor` seconds — the only honest way to
+    /// test that something sends *nothing*, since "not yet" and "never" look identical to a poll.
+    func expectNoMoreRequests(beyond count: Int, settleFor: TimeInterval = 0.5,
+                              file: StaticString = #filePath, line: UInt = #line) throws {
+        let deadline = Date().addingTimeInterval(settleFor)
+        repeat {
+            let observed = try requests()
+            guard observed.count <= count else {
+                XCTFail("Expected no request beyond #\(count), but the server logged "
+                        + "\(observed.count): \(observed.map(\.summary))", file: file, line: line)
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        } while Date() < deadline
     }
 
     /// Polls `produce` until it returns non-nil. `produce` may throw only for real transport
@@ -102,8 +141,13 @@ struct MockDelayedServer {
     /// Asserts the tracker never sent anything the server refused. Cheap to call in teardown,
     /// and it is the assertion that actually protects the wire format: a body the SDK is happy
     /// with but the endpoint rejects shows up here and nowhere else.
+    ///
+    /// Scripted entries are exempt. A scripted status is chosen by the test, and the mock runs
+    /// its real validation *before* consuming the queue, so a scripted 500 or hang-up is not
+    /// the endpoint refusing the body — it is the test asking for a failure the body was
+    /// already good enough to have avoided.
     func assertNoRejectedRequests(file: StaticString = #filePath, line: UInt = #line) throws {
-        let rejected = try requests().filter { $0.status != 200 }
+        let rejected = try requests().filter { !$0.scripted && $0.status != 200 }
         for entry in rejected {
             XCTFail("Server rejected request #\(entry.seq) with HTTP \(entry.status): "
                     + "\(entry.error ?? "no error string")", file: file, line: line)
@@ -113,12 +157,17 @@ struct MockDelayedServer {
     // MARK: - Transport
 
     private func get<T: Decodable>(_ path: String, as type: T.Type) throws -> T {
-        try request(method: "GET", path: path, as: type)
+        try send(method: "GET", path: path, body: nil, as: type)
     }
 
-    private func request<T: Decodable>(method: String, path: String, as type: T.Type) throws -> T {
+    private func send<T: Decodable>(method: String, path: String, body: Data?,
+                                    as type: T.Type) throws -> T {
         var urlRequest = URLRequest(url: baseUrl.appendingPathComponent(path), timeoutInterval: 5)
         urlRequest.httpMethod = method
+        if let body {
+            urlRequest.httpBody = body
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
 
         let semaphore = DispatchSemaphore(value: 0)
         var result: Result<Data, Error> = .failure(MockServerError.noResponse)
@@ -177,25 +226,71 @@ extension MockDelayedServer {
         let requests: [Request]
     }
 
-    private struct IngestLog: Decodable {
-        let count: Int
-        let ingested: [IngestBatch]
+    private struct ScriptRequest: Encodable {
+        let queue: [ScriptedResponse]
     }
 
-    private struct StateSnapshot: Decodable {
+    private struct ScriptQueuedResponse: Decodable {
+        let queued: Int
+    }
+
+    private struct ScriptSnapshot: Decodable {
+        let queue: [[String: JSONValue]]
+    }
+
+    /// One queued entry for `POST /debug/script`. `nil` fields are omitted, letting the mock
+    /// apply its own defaults (status 200, empty body).
+    struct ScriptedResponse: Encodable {
+        var status: Int?
+        var body: [String: JSONValue]?
+        var close: Bool?
+
+        /// An HTTP status the client will see, with an optional response body.
+        ///
+        /// Careful with scripted *successes*: `DelayedEventsHttpClient` decodes a 2xx body into
+        /// `DelayedResponseBody`, whose `id` is non-optional, and turns a decode failure into
+        /// `.failure`. A bare `.status(200)` therefore reaches the SDK as an error, not a
+        /// success. A scripted success must supply a real body, e.g.
+        /// `["code": .number(200), "id": .string(delayId), "flushed": .bool(true)]`.
+        static func status(_ status: Int, body: [String: JSONValue]? = nil) -> ScriptedResponse {
+            ScriptedResponse(status: status, body: body, close: nil)
+        }
+
+        /// Hangs up without responding, so the client sees a transport error rather than a status.
+        static let hangUp = ScriptedResponse(status: nil, body: nil, close: true)
+    }
+
+    /// `GET /debug/state`. Modelled for completeness only — see `state()`; do not assert on it.
+    struct StateSnapshot: Decodable {
         let count: Int
-        let rows: [Row]
+        let entries: [Entry]
+
+        struct Entry: Decodable {
+            let apiKey: String?
+            let id: String?
+            let timeout: Int64?
+            let events: [MockEvent]
+            let storedAt: Int64
+
+            enum CodingKeys: String, CodingKey {
+                case apiKey = "api_key"
+                case id
+                case timeout
+                case events
+                case storedAt = "stored_at"
+            }
+        }
     }
 
     /// One entry of `GET /debug/requests`.
     struct Request: Decodable {
         /// What the server did, in order. Mirrors the mock's documented vocabulary.
         enum Action: String, Decodable {
-            case upsert
-            case ingestInstant = "ingest_instant"
+            case store
             case flush
-            case delete
-            case ingestDirect = "ingest_direct"
+            case drop
+            case sink
+            case closed
             case unhandled
         }
 
@@ -203,18 +298,33 @@ extension MockDelayedServer {
         let receivedAt: Int64
         let method: String
         let path: String
+        /// The status the mock returned, or 0 when it hung up without responding.
         let status: Int
         let apiKey: String?
         let id: String?
         let timeout: Int64?
         let events: [MockEvent]
         let instantEvents: [MockEvent]
+        /// The whole parsed request body, verbatim. Asserting on its key set is what catches a
+        /// renamed `CodingKey` in `DelayedRequestBody`.
+        let body: [String: JSONValue]?
+        let rawBody: String?
         let response: [String: JSONValue]?
         let error: String?
+        let scripted: Bool
         let actions: [Action]
 
         var eventInsertIds: [String] { events.compactMap(\.insertId) }
         var instantInsertIds: [String] { instantEvents.compactMap(\.insertId) }
+
+        /// Top-level keys of the body as received. `nil` when the body did not parse.
+        var bodyKeys: Set<String>? { body.map { Set($0.keys) } }
+
+        var summary: String {
+            "#\(seq) \(method) \(path) -> \(status)"
+                + " events=\(eventInsertIds) instant=\(instantInsertIds)"
+                + " timeout=\(timeout.map(String.init) ?? "nil") actions=\(actions.map(\.rawValue))"
+        }
 
         enum CodingKeys: String, CodingKey {
             case seq
@@ -227,81 +337,12 @@ extension MockDelayedServer {
             case timeout
             case events
             case instantEvents = "instant_events"
+            case body
+            case rawBody = "raw_body"
             case response
             case error
+            case scripted
             case actions
-        }
-    }
-
-    /// One entry of `GET /debug/ingested` — a batch that reached the (simulated) event API.
-    struct IngestBatch: Decodable {
-        enum Trigger: String, Decodable {
-            case instant
-            case flush
-            case ttl
-            case direct
-        }
-
-        let seq: Int
-        let at: Int64
-        let trigger: Trigger
-        let requestSeq: Int?
-        let apiKey: String?
-        let id: String?
-        let eventCount: Int
-        let events: [MockEvent]
-
-        var insertIds: [String] { events.compactMap(\.insertId) }
-
-        enum CodingKeys: String, CodingKey {
-            case seq
-            case at
-            case trigger
-            case requestSeq = "request_seq"
-            case apiKey = "api_key"
-            case id
-            case eventCount = "event_count"
-            case events
-        }
-    }
-
-    /// One stored row of `GET /debug/state` — one DynamoDB item in the real service.
-    struct Row: Decodable {
-        let id: String
-        let apiKey: String
-        let delayId: String
-        let orgId: Int
-        let timeoutMs: Int64
-        let createdAt: Int64
-        let updatedAt: Int64
-        let expiration: Int64
-        let eventData: [String: JSONValue]
-
-        /// The delayed events the server is holding, i.e. what TTL expiry would ingest.
-        var storedEvents: [MockEvent] {
-            guard case .array(let values)? = eventData["events"] else { return [] }
-            return values.compactMap { value in
-                guard case .object(let fields) = value else { return nil }
-                return MockEvent(raw: fields)
-            }
-        }
-
-        var storedInsertIds: [String] { storedEvents.compactMap(\.insertId) }
-
-        /// Whether the stored body still carries `instant_events`, which it must not when the
-        /// request that wrote it had any.
-        var storedInstantEvents: JSONValue? { eventData["instant_events"] }
-
-        enum CodingKeys: String, CodingKey {
-            case id
-            case apiKey = "api_key"
-            case delayId = "delay_id"
-            case orgId = "org_id"
-            case timeoutMs = "timeout_ms"
-            case createdAt = "created_at"
-            case updatedAt = "updated_at"
-            case expiration
-            case eventData = "event_data"
         }
     }
 }
@@ -325,8 +366,8 @@ struct MockEvent: Decodable {
     }
 }
 
-/// Just enough JSON to assert on payloads the SDK does not own the shape of.
-enum JSONValue: Decodable, Equatable {
+/// Just enough JSON to assert on — and to script — payloads the SDK does not own the shape of.
+enum JSONValue: Codable, Equatable {
     case null
     case bool(Bool)
     case number(Double)
@@ -365,6 +406,18 @@ enum JSONValue: Decodable, Equatable {
             self = .object(value)
         } else {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "unsupported JSON value")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case .bool(let value): try container.encode(value)
+        case .number(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
         }
     }
 }
