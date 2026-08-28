@@ -94,12 +94,15 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         delayedEvents.track(first)
         waitForUploads(1)
 
+        // A refresh rides the next request rather than sending one of its own.
         delayedEvents.track(first.updated { $0.eventType = "Second" })
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-2"), kind: .delayed))
         waitForUploads(2)
 
-        XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["ins-1"], "one entry, not two")
-        XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second"])
-        XCTAssertNotNil(uploader.bodies[1].events[0].platform, "refresh keeps its enrichment")
+        let events = uploader.bodies[1].events
+        XCTAssertEqual(events.compactMap(\.insertId), ["ins-1", "ins-2"], "replaced in place, not appended")
+        XCTAssertEqual(events[0].eventType, "Second")
+        XCTAssertNotNil(events[0].platform, "refresh keeps its enrichment")
     }
 
     /// The routing tag is transport-local: it must never reach the wire.

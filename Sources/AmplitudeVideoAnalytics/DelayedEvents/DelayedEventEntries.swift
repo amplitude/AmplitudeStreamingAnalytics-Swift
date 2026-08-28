@@ -3,10 +3,8 @@ import Foundation
 
 extension DelayedEventTracker {
     struct Entry {
-        enum Kind {
-            case instant
-            case delayed
-        }
+        /// The lane is the event's own; the tracker does not decide it.
+        typealias Kind = DelayedEvent.Kind
 
         let event: BaseEvent
         let kind: Kind

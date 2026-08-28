@@ -3,7 +3,8 @@ import Foundation
 
 /// Keeps delayed events alive on the ingestion server until they are finalized.
 /// Every request is a full-replace upsert of one server row, so each send carries the complete
-/// live set. A tracked event must not be mutated after being handed over; refresh via `update(_:)`.
+/// live set. A tracked event must not be mutated after being handed over; refresh it by
+/// tracking a fresh event carrying the same `insert_id`.
 final class DelayedEventTracker {
     private let configuration: Configuration
     private let httpClient: DelayedEventsUploading
@@ -34,29 +35,25 @@ final class DelayedEventTracker {
         }
     }
 
-    /// Routes on the event's own kind, so callers state intent where they build the event.
+    /// Admits an event into the live set, in the lane its own `kind` names.
+    ///
+    /// A known `insert_id` is a refresh of that entry rather than a new event, so it replaces the
+    /// entry and waits for the pulse — refreshes arrive far faster than the pulse does. Instants
+    /// always send, which is how a live entry is finalized.
     func track(_ event: DelayedEvent) {
-        switch event.kind {
-        case .instant: add(event, kind: .instant)
-        case .delayed: add(event, kind: .delayed)
-        }
-    }
-
-    func track(_ event: BaseEvent) {
-        add(event, kind: .instant)
-    }
-
-    func trackDelayed(_ event: BaseEvent) {
-        add(event, kind: .delayed)
-    }
-
-    func update(_ event: BaseEvent) {
         guard let insertId = insertId(of: event) else { return }
         queue.async {
-            guard self.entries[insertId] != nil,
-                  let entry = self.admissibleEntry(event, kind: .delayed, insertId: insertId) else { return }
+            let isRefresh = self.entries[insertId] != nil
+            guard let entry = self.admissibleEntry(event, kind: event.kind, insertId: insertId) else {
+                // A refresh that cannot be admitted leaves the live entry standing.
+                self.suspendPulseIfIdle()
+                return
+            }
             self.entries.upsert(entry, for: insertId)
-            // No send: updates arrive far faster than the pulse and ride the next one.
+            self.timer.resume()
+            if !isRefresh || event.kind == .instant {
+                self.setNeedsSend()
+            }
         }
     }
 
@@ -75,21 +72,6 @@ final class DelayedEventTracker {
             self.entries.removeAll()
             self.delayId = UUID().uuidString
             self.reset()
-        }
-    }
-
-    private func add(_ event: BaseEvent, kind: Entry.Kind) {
-        guard let insertId = insertId(of: event) else { return }
-        queue.async {
-            if let entry = self.admissibleEntry(event, kind: kind, insertId: insertId) {
-                self.entries.upsert(entry, for: insertId)
-                self.timer.resume()
-                self.setNeedsSend()
-            } else {
-                // A rejected add also evicts any queued entry under the same id.
-                self.entries.remove(insertId)
-                self.suspendPulseIfIdle()
-            }
         }
     }
 
