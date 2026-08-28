@@ -25,4 +25,16 @@ final class DelayedEvent: BaseEvent {
         groups = event.groups
         groupProperties = event.groupProperties
     }
+
+    /// A fresh event for the same entry: same `insert_id` and lane, new content. Tracking it
+    /// replaces the stored entry rather than adding one, and re-enriches on the way through.
+    ///
+    /// Deriving rather than mutating is how an already-tracked event stays untouched — the
+    /// inherited setters cannot be sealed, so this is the convention that stands in for it.
+    func updated(_ changes: (BaseEvent) -> Void) -> DelayedEvent {
+        let next = DelayedEvent(wrapping: self, kind: kind)
+        changes(next)
+        next.insertId = insertId
+        return next
+    }
 }

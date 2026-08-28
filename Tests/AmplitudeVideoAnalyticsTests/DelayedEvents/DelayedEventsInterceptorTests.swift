@@ -68,6 +68,40 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertEqual(delayed.eventProperties?["position"] as? Double, 12.5)
     }
 
+    func testUpdatedKeepsTheInsertIdAndLaneAndLeavesTheOriginalAlone() {
+        let original = DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed)
+
+        let next = original.updated { $0.eventType = "Second" }
+
+        XCTAssertEqual(next.insertId, "ins-1")
+        XCTAssertEqual(next.kind, .delayed)
+        XCTAssertEqual(next.eventType, "Second")
+        XCTAssertEqual(original.eventType, "First", "deriving must not mutate the original")
+    }
+
+    /// Keeping the id intact is the point of the API, so it wins over the closure.
+    func testUpdatedCannotChangeTheInsertId() {
+        let original = DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed)
+
+        XCTAssertEqual(original.updated { $0.insertId = "other" }.insertId, "ins-1")
+    }
+
+    /// The refresh path Task 6 needs: same entry, new content, enrichment reapplied because it
+    /// takes the timeline trip again.
+    func testTrackingAnUpdatedEventReplacesTheEntryInPlace() {
+        makeFacade()
+        let first = DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed)
+        delayedEvents.track(first)
+        waitForUploads(1)
+
+        delayedEvents.track(first.updated { $0.eventType = "Second" })
+        waitForUploads(2)
+
+        XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["ins-1"], "one entry, not two")
+        XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second"])
+        XCTAssertNotNil(uploader.bodies[1].events[0].platform, "refresh keeps its enrichment")
+    }
+
     /// The routing tag is transport-local: it must never reach the wire.
     func testKindIsNotEncoded() throws {
         let delayed = DelayedEvent(wrapping: makeEvent("a"), kind: .delayed)
