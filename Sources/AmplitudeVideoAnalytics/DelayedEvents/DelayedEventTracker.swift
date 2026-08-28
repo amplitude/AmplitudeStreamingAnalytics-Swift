@@ -3,7 +3,7 @@ import Foundation
 
 /// Keeps delayed events alive on the ingestion server until they are finalized.
 /// Every request is a full-replace upsert of one server row, so each send carries the complete
-/// live set. A tracked event must not be mutated after being handed over; refresh via `update(_:)`.
+/// live set. Do not mutate a tracked event; refresh it by tracking a fresh one with the same id.
 final class DelayedEventTracker {
     private let configuration: Configuration
     private let httpClient: DelayedEventsUploading
@@ -34,22 +34,25 @@ final class DelayedEventTracker {
         }
     }
 
-    func track(_ event: BaseEvent) {
-        add(event, kind: .instant)
-    }
-
-    func trackDelayed(_ event: BaseEvent) {
-        add(event, kind: .delayed)
-    }
-
-    func update(_ event: BaseEvent) {
-        guard let insertId = insertId(of: event) else { return }
-        queue.async {
-            guard self.entries[insertId] != nil,
-                  let entry = self.admissibleEntry(event, kind: .delayed, insertId: insertId) else { return }
-            self.entries.upsert(entry, for: insertId)
-            // No send: updates arrive far faster than the pulse and ride the next one.
+    func track(_ event: DelayedEvent) {
+        guard let insertId = event.insertId, !insertId.isEmpty else {
+            logger?.error(message: "DelayedEventTracker: insert_id is required on tracked events")
+            return
         }
+        queue.async {
+            // An instant is never a refresh: sending it finalizes the live entry.
+            if event.kind == .delayed, self.entries[insertId] != nil {
+                self.update(event, insertId: insertId)
+            } else {
+                self.add(event, insertId: insertId)
+            }
+        }
+    }
+
+    private func update(_ event: DelayedEvent, insertId: String) {
+        // A rejected refresh leaves the live entry standing; no send, it rides the next pulse.
+        guard let entry = admissibleEntry(event, insertId: insertId) else { return }
+        entries.upsert(entry, for: insertId)
     }
 
     func flush() {
@@ -70,18 +73,13 @@ final class DelayedEventTracker {
         }
     }
 
-    private func add(_ event: BaseEvent, kind: Entry.Kind) {
-        guard let insertId = insertId(of: event) else { return }
-        queue.async {
-            if let entry = self.admissibleEntry(event, kind: kind, insertId: insertId) {
-                self.entries.upsert(entry, for: insertId)
-                self.timer.resume()
-                self.setNeedsSend()
-            } else {
-                // A rejected add also evicts any queued entry under the same id.
-                self.entries.remove(insertId)
-                self.suspendPulseIfIdle()
-            }
+    private func add(_ event: DelayedEvent, insertId: String) {
+        if let entry = admissibleEntry(event, insertId: insertId) {
+            entries.upsert(entry, for: insertId)
+            timer.resume()
+            setNeedsSend()
+        } else {
+            suspendPulseIfIdle()
         }
     }
 
@@ -135,8 +133,8 @@ final class DelayedEventTracker {
     }
 
     private func makeRequestBody(flushing: Bool) -> (body: DelayedRequestBody, settledIds: [String]) {
-        var delayedEvents: [BaseEvent] = []
-        var instantEvents: [BaseEvent] = []
+        var delayedEvents: [DelayedEvent] = []
+        var instantEvents: [DelayedEvent] = []
         var settledIds: [String] = []
         for (insertId, entry) in entries.inOrder {
             switch entry.kind {
@@ -162,8 +160,8 @@ final class DelayedEventTracker {
         }
     }
 
-    private func admissibleEntry(_ event: BaseEvent, kind: Entry.Kind, insertId: String) -> Entry? {
-        switch entries.admissibleEntry(event, kind: kind, for: insertId) {
+    private func admissibleEntry(_ event: DelayedEvent, insertId: String) -> Entry? {
+        switch entries.admissibleEntry(event, for: insertId) {
         case .success(let entry):
             return entry
         case .failure(.unencodable):
@@ -173,13 +171,5 @@ final class DelayedEventTracker {
             logger?.warn(message: "DelayedEventTracker: events size limit reached, rejecting event with id=\(insertId)")
             return nil
         }
-    }
-
-    private func insertId(of event: BaseEvent) -> String? {
-        guard let insertId = event.insertId, !insertId.isEmpty else {
-            logger?.error(message: "DelayedEventTracker: insert_id is required on tracked events")
-            return nil
-        }
-        return insertId
     }
 }
