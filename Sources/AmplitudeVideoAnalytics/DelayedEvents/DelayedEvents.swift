@@ -2,10 +2,8 @@ import AmplitudeSwift
 import Foundation
 
 /// Entry point onto the delayed transport. Tracked events take a round trip through the host
-/// timeline, so they carry the same identity and context enrichment as any other event.
-///
-/// A tracked event must not be mutated after being handed over, matching the tracker's own
-/// contract: the event is not copied again on the way out.
+/// timeline to pick up the same enrichment as any other event. Do not mutate one after
+/// tracking it — derive a fresh one with `updated(_:)`.
 final class DelayedEvents {
     private weak var amplitude: Amplitude?
     private let tracker: DelayedEventTracker
@@ -21,7 +19,6 @@ final class DelayedEvents {
         })
     }
 
-    /// The event's own `kind` decides its lane; the tracker routes on it once enriched.
     func track(_ event: DelayedEvent) {
         amplitude?.track(event: event)
     }

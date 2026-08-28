@@ -4,8 +4,7 @@ import AmplitudeSwift
 
 final class DelayedEventsInterceptorTests: XCTestCase {
     private var uploader: FakeDelayedEventsUploader!
-    // Held for the test's lifetime: the facade is retained only weakly by the interceptor it
-    // installs, so a local would be free to deallocate before the upload lands.
+    // Held for the test's lifetime: the interceptor retains the facade only weakly.
     private var amplitude: Amplitude!
     private var delayedEvents: DelayedEvents!
 
@@ -32,7 +31,6 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertNil(plugin.execute(event: delayed))
         XCTAssertEqual(intercepted.count, 1)
         XCTAssertEqual(intercepted.first?.kind, .delayed)
-        // The enriched instance itself is forwarded, not a copy taken at wrap time.
         XCTAssertIdentical(intercepted.first, delayed)
     }
 
@@ -79,15 +77,12 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertEqual(original.eventType, "First", "deriving must not mutate the original")
     }
 
-    /// Keeping the id intact is the point of the API, so it wins over the closure.
     func testUpdatedCannotChangeTheInsertId() {
         let original = DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed)
 
         XCTAssertEqual(original.updated { $0.insertId = "other" }.insertId, "ins-1")
     }
 
-    /// The refresh path Task 6 needs: same entry, new content, enrichment reapplied because it
-    /// takes the timeline trip again.
     func testTrackingAnUpdatedEventReplacesTheEntryInPlace() {
         makeFacade()
         let first = DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed)
@@ -105,7 +100,6 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertNotNil(events[0].platform, "refresh keeps its enrichment")
     }
 
-    /// The routing tag is transport-local: it must never reach the wire.
     func testKindIsNotEncoded() throws {
         let delayed = DelayedEvent(wrapping: makeEvent("a"), kind: .delayed)
 
@@ -117,9 +111,8 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     // MARK: - facade, through a real Amplitude timeline
 
-    /// Also the ordering probe: `ContextPlugin` is registered inside `Amplitude.init` and the
-    /// mediator runs `.before` plugins in insertion order, so it must precede this interceptor.
-    /// A nil `platform` here means that assumption broke, not that an assertion needs relaxing.
+    /// Ordering probe: a nil `platform` means ContextPlugin no longer precedes us, which is a
+    /// design problem rather than an assertion to relax.
     func testFacadeRoutesThroughRealTimelineWithEnrichment() {
         makeFacade()
         let event = makeEvent("ins-1")
@@ -135,8 +128,6 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertNotNil(sent.platform, "ContextPlugin enrichment must reach the interceptor")
     }
 
-    /// The caller's own instance never reaches the transport — the delayed event wraps a copy of it —
-    /// so a caller that keeps holding its event cannot mutate what is in flight.
     func testFacadeDoesNotHandOverTheCallersInstance() {
         makeFacade()
         let event = makeEvent("ins-1")
@@ -147,9 +138,8 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertNotIdentical(uploader.bodies[0].events[0], event)
     }
 
-    /// Swallowing at `.before` short-circuits the rest of the timeline, so `.enrichment` plugins
-    /// never see a delayed event. Web re-tracks heartbeats through its full pipeline and does not
-    /// have this gap — pinned here so a change in plugin type surfaces as a failure.
+    /// Swallowing at `.before` skips `.enrichment` entirely, which web does not do. Pinned so a
+    /// change in plugin type surfaces as a failure.
     func testDelayedEventsBypassEnrichmentPlugins() {
         let spy = SpyEnrichmentPlugin()
         makeFacade(enrichment: spy)
@@ -197,8 +187,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     // MARK: - helpers
 
-    /// Offline and without autocapture, so the host SDK's own uploader and its session events
-    /// stay out of the way; only the delayed transport should see traffic.
+    /// Offline and without autocapture, so only the delayed transport sees traffic.
     private func makeFacade(enrichment: SpyEnrichmentPlugin? = nil) {
         amplitude = Amplitude(configuration: Configuration(apiKey: "facade-\(UUID().uuidString)",
                                                            instanceName: "facade-\(UUID().uuidString)",

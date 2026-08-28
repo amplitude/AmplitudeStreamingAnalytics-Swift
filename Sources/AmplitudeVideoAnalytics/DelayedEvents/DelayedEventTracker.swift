@@ -35,17 +35,14 @@ final class DelayedEventTracker {
         }
     }
 
-    /// Admits an event into the live set, in the lane its own `kind` names.
-    ///
-    /// A known `insert_id` is a refresh of that entry rather than a new event, so it replaces the
-    /// entry and waits for the pulse — refreshes arrive far faster than the pulse does. Instants
-    /// always send, which is how a live entry is finalized.
+    /// A known `insert_id` is a refresh: it replaces the entry and rides the next pulse, since
+    /// refreshes arrive far faster. Instants always send — that is how an entry is finalized.
     func track(_ event: DelayedEvent) {
         guard let insertId = insertId(of: event) else { return }
         queue.async {
             let isRefresh = self.entries[insertId] != nil
             guard let entry = self.admissibleEntry(event, kind: event.kind, insertId: insertId) else {
-                // A refresh that cannot be admitted leaves the live entry standing.
+                // A rejected refresh leaves the live entry standing.
                 self.suspendPulseIfIdle()
                 return
             }

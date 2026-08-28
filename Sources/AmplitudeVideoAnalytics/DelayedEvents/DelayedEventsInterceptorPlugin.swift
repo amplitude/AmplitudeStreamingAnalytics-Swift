@@ -1,8 +1,8 @@
 import AmplitudeSwift
 import Foundation
 
-/// Diverts delayed events off the host timeline and onto the delayed transport.
-/// Registered after the SDK's own `.before` plugins, so what it forwards is already enriched.
+/// Diverts delayed events off the host timeline. Registered after the SDK's own `.before`
+/// plugins, so what it forwards is already enriched.
 final class DelayedEventsInterceptorPlugin: BeforePlugin {
     private let onIntercept: (DelayedEvent) -> Void
 
