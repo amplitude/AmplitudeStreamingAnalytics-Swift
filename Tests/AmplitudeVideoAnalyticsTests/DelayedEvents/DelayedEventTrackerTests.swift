@@ -28,7 +28,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["a"])
     }
 
-    // MARK: - trackDelayed
+    // MARK: - track
 
     func testTrackDelayedSendsEntireCollection() {
         let tracker = makeTracker()
@@ -92,7 +92,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         XCTAssertNil(uploader.bodies[1].instantEvents)
     }
 
-    // MARK: - instant events (track)
+    // MARK: - instant events
 
     func testInstantEventIsDroppedAfterSuccess() {
         assertInstantDropped(settlingWith: .success(DelayedResponseBody(id: "d", expiration: nil, flushed: true)))

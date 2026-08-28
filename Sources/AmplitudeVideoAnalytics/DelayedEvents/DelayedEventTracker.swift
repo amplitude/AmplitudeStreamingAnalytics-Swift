@@ -3,8 +3,7 @@ import Foundation
 
 /// Keeps delayed events alive on the ingestion server until they are finalized.
 /// Every request is a full-replace upsert of one server row, so each send carries the complete
-/// live set. A tracked event must not be mutated after being handed over; refresh it by
-/// tracking a fresh event carrying the same `insert_id`.
+/// live set. Do not mutate a tracked event; refresh it by tracking a fresh one with the same id.
 final class DelayedEventTracker {
     private let configuration: Configuration
     private let httpClient: DelayedEventsUploading
@@ -35,23 +34,25 @@ final class DelayedEventTracker {
         }
     }
 
-    /// A known `insert_id` is a refresh: it replaces the entry and rides the next pulse, since
-    /// refreshes arrive far faster. Instants always send — that is how an entry is finalized.
     func track(_ event: DelayedEvent) {
-        guard let insertId = insertId(of: event) else { return }
+        guard let insertId = event.insertId, !insertId.isEmpty else {
+            logger?.error(message: "DelayedEventTracker: insert_id is required on tracked events")
+            return
+        }
         queue.async {
-            let isRefresh = self.entries[insertId] != nil
-            guard let entry = self.admissibleEntry(event, kind: event.kind, insertId: insertId) else {
-                // A rejected refresh leaves the live entry standing.
-                self.suspendPulseIfIdle()
-                return
-            }
-            self.entries.upsert(entry, for: insertId)
-            self.timer.resume()
-            if !isRefresh || event.kind == .instant {
-                self.setNeedsSend()
+            // An instant is never a refresh: sending it finalizes the live entry.
+            if event.kind == .delayed, self.entries[insertId] != nil {
+                self.update(event, insertId: insertId)
+            } else {
+                self.add(event, insertId: insertId)
             }
         }
+    }
+
+    private func update(_ event: DelayedEvent, insertId: String) {
+        // A rejected refresh leaves the live entry standing; no send, it rides the next pulse.
+        guard let entry = admissibleEntry(event, insertId: insertId) else { return }
+        entries.upsert(entry, for: insertId)
     }
 
     func flush() {
@@ -69,6 +70,16 @@ final class DelayedEventTracker {
             self.entries.removeAll()
             self.delayId = UUID().uuidString
             self.reset()
+        }
+    }
+
+    private func add(_ event: DelayedEvent, insertId: String) {
+        if let entry = admissibleEntry(event, insertId: insertId) {
+            entries.upsert(entry, for: insertId)
+            timer.resume()
+            setNeedsSend()
+        } else {
+            suspendPulseIfIdle()
         }
     }
 
@@ -122,8 +133,8 @@ final class DelayedEventTracker {
     }
 
     private func makeRequestBody(flushing: Bool) -> (body: DelayedRequestBody, settledIds: [String]) {
-        var delayedEvents: [BaseEvent] = []
-        var instantEvents: [BaseEvent] = []
+        var delayedEvents: [DelayedEvent] = []
+        var instantEvents: [DelayedEvent] = []
         var settledIds: [String] = []
         for (insertId, entry) in entries.inOrder {
             switch entry.kind {
@@ -149,8 +160,8 @@ final class DelayedEventTracker {
         }
     }
 
-    private func admissibleEntry(_ event: BaseEvent, kind: Entry.Kind, insertId: String) -> Entry? {
-        switch entries.admissibleEntry(event, kind: kind, for: insertId) {
+    private func admissibleEntry(_ event: DelayedEvent, insertId: String) -> Entry? {
+        switch entries.admissibleEntry(event, for: insertId) {
         case .success(let entry):
             return entry
         case .failure(.unencodable):
@@ -160,13 +171,5 @@ final class DelayedEventTracker {
             logger?.warn(message: "DelayedEventTracker: events size limit reached, rejecting event with id=\(insertId)")
             return nil
         }
-    }
-
-    private func insertId(of event: BaseEvent) -> String? {
-        guard let insertId = event.insertId, !insertId.isEmpty else {
-            logger?.error(message: "DelayedEventTracker: insert_id is required on tracked events")
-            return nil
-        }
-        return insertId
     }
 }

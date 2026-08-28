@@ -23,30 +23,20 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     // MARK: - interceptor plugin
 
-    func testDelayedEventIsSwallowedAndForwarded() {
-        var intercepted: [DelayedEvent] = []
-        let plugin = DelayedEventsInterceptorPlugin { intercepted.append($0) }
-        let delayed = DelayedEvent(wrapping: makeEvent("a"), kind: .delayed)
+    func testDelayedEventIsSwallowedAndHandedToTheTransport() {
+        makeFacade()
 
-        XCTAssertNil(plugin.execute(event: delayed))
-        XCTAssertEqual(intercepted.count, 1)
-        XCTAssertEqual(intercepted.first?.kind, .delayed)
-        XCTAssertIdentical(intercepted.first, delayed)
-    }
+        XCTAssertNil(delayedEvents.execute(event: DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed)))
 
-    func testInstantEventCarriesTheInstantKind() {
-        var intercepted: [DelayedEvent] = []
-        let plugin = DelayedEventsInterceptorPlugin { intercepted.append($0) }
-
-        XCTAssertNil(plugin.execute(event: DelayedEvent(wrapping: makeEvent("a"), kind: .instant)))
-        XCTAssertEqual(intercepted.map(\.kind), [.instant])
+        waitForUploads(1)
+        XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["ins-1"])
     }
 
     func testOrdinaryEventPassesThroughUntouched() {
-        let plugin = DelayedEventsInterceptorPlugin { _ in XCTFail("must not intercept") }
+        makeFacade()
         let event = makeEvent("a", type: "Regular Event")
 
-        XCTAssertIdentical(plugin.execute(event: event), event)
+        XCTAssertIdentical(delayedEvents.execute(event: event), event)
     }
 
     // MARK: - delayed event
@@ -66,31 +56,13 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertEqual(delayed.eventProperties?["position"] as? Double, 12.5)
     }
 
-    func testUpdatedKeepsTheInsertIdAndLaneAndLeavesTheOriginalAlone() {
-        let original = DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed)
-
-        let next = original.updated { $0.eventType = "Second" }
-
-        XCTAssertEqual(next.insertId, "ins-1")
-        XCTAssertEqual(next.kind, .delayed)
-        XCTAssertEqual(next.eventType, "Second")
-        XCTAssertEqual(original.eventType, "First", "deriving must not mutate the original")
-    }
-
-    func testUpdatedCannotChangeTheInsertId() {
-        let original = DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed)
-
-        XCTAssertEqual(original.updated { $0.insertId = "other" }.insertId, "ins-1")
-    }
-
-    func testTrackingAnUpdatedEventReplacesTheEntryInPlace() {
+    func testRefreshingAnEntryReplacesItInPlace() {
         makeFacade()
-        let first = DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed)
-        delayedEvents.track(first)
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed))
         waitForUploads(1)
 
         // A refresh rides the next request rather than sending one of its own.
-        delayedEvents.track(first.updated { $0.eventType = "Second" })
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "Second"), kind: .delayed))
         delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-2"), kind: .delayed))
         waitForUploads(2)
 
@@ -128,16 +100,6 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertNotNil(sent.platform, "ContextPlugin enrichment must reach the interceptor")
     }
 
-    func testFacadeDoesNotHandOverTheCallersInstance() {
-        makeFacade()
-        let event = makeEvent("ins-1")
-
-        delayedEvents.track(DelayedEvent(wrapping: event, kind: .delayed))
-        waitForUploads(1)
-
-        XCTAssertNotIdentical(uploader.bodies[0].events[0], event)
-    }
-
     /// Swallowing at `.before` skips `.enrichment` entirely, which web does not do. Pinned so a
     /// change in plugin type surfaces as a failure.
     func testDelayedEventsBypassEnrichmentPlugins() {
@@ -150,16 +112,6 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
         XCTAssertTrue(spy.seen.contains("Regular Event"), "the spy must be reached by ordinary events")
         XCTAssertFalse(spy.seen.contains("Content Stopped"))
-    }
-
-    func testFacadeTrackRidesTheInstantLane() {
-        makeFacade()
-
-        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .instant))
-        waitForUploads(1)
-
-        XCTAssertEqual(uploader.bodies[0].instantEvents?.compactMap(\.insertId), ["ins-1"])
-        XCTAssertTrue(uploader.bodies[0].events.isEmpty)
     }
 
     func testFacadeFlushFinalizesTheRow() {

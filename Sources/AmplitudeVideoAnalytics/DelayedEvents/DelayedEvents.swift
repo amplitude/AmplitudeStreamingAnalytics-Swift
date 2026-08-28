@@ -1,22 +1,20 @@
 import AmplitudeSwift
 import Foundation
 
-/// Entry point onto the delayed transport. Tracked events take a round trip through the host
-/// timeline to pick up the same enrichment as any other event. Do not mutate one after
-/// tracking it — derive a fresh one with `updated(_:)`.
-final class DelayedEvents {
-    private weak var amplitude: Amplitude?
+/// Entry point onto the delayed transport, and the `.before` plugin that takes its events back off
+/// the host timeline. Tracked events take a round trip through that timeline to pick up the same
+/// enrichment as any other event. Do not mutate one after tracking it — track a fresh one carrying
+/// the same `insert_id` instead.
+final class DelayedEvents: BeforePlugin {
     private let tracker: DelayedEventTracker
 
     init(amplitude: Amplitude, httpClient: DelayedEventsUploading? = nil) {
         let configuration = amplitude.configuration
-        self.amplitude = amplitude
-        self.tracker = DelayedEventTracker(
+        tracker = DelayedEventTracker(
             configuration: configuration,
             httpClient: httpClient ?? DelayedEventsHttpClient(configuration: configuration))
-        amplitude.add(plugin: DelayedEventsInterceptorPlugin { [weak self] event in
-            self?.tracker.track(event)
-        })
+        super.init()
+        amplitude.add(plugin: self)
     }
 
     func track(_ event: DelayedEvent) {
@@ -29,5 +27,13 @@ final class DelayedEvents {
 
     func discard() {
         tracker.discard()
+    }
+
+    /// Registered after the SDK's own `.before` plugins, so what reaches the transport is already
+    /// enriched. Returning nil keeps delayed events out of the host's uploader.
+    override func execute(event: BaseEvent) -> BaseEvent? {
+        guard let delayed = event as? DelayedEvent else { return event }
+        tracker.track(delayed)
+        return nil
     }
 }

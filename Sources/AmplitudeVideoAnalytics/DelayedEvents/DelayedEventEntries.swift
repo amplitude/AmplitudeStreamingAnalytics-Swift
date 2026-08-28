@@ -5,15 +5,15 @@ extension DelayedEventTracker {
     struct Entry {
         typealias Kind = DelayedEvent.Kind
 
-        let event: BaseEvent
-        let kind: Kind
+        let event: DelayedEvent
         /// Bytes of the event encoded alone, so admission stays O(1).
         let encodedSize: Int
 
-        init?(event: BaseEvent, kind: Kind) {
+        var kind: Kind { event.kind }
+
+        init?(event: DelayedEvent) {
             guard let data = try? JSONEncoder().encode(event) else { return nil }
             self.event = event
-            self.kind = kind
             self.encodedSize = data.count
         }
     }
@@ -37,8 +37,8 @@ extension DelayedEventTracker {
         subscript(insertId: String) -> Entry? { byId[insertId] }
 
         /// Decides only — storing a `.success` entry stays a separate `upsert` call.
-        func admissibleEntry(_ event: BaseEvent, kind: Entry.Kind, for insertId: String) -> Result<Entry, Rejection> {
-            guard let entry = Entry(event: event, kind: kind) else {
+        func admissibleEntry(_ event: DelayedEvent, for insertId: String) -> Result<Entry, Rejection> {
+            guard let entry = Entry(event: event) else {
                 return .failure(.unencodable)
             }
             guard encodedSetSize(upserting: entry, for: insertId) <= DelayedEventsDefaults.eventsSizeLimit else {

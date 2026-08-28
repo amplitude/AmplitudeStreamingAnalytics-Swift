@@ -22,12 +22,4 @@ final class DelayedEvent: BaseEvent {
         groups = event.groups
         groupProperties = event.groupProperties
     }
-
-    /// A fresh event for the same entry: same `insert_id` and lane, new content.
-    func updated(_ changes: (BaseEvent) -> Void) -> DelayedEvent {
-        let next = DelayedEvent(wrapping: self, kind: kind)
-        changes(next)
-        next.insertId = insertId
-        return next
-    }
 }
