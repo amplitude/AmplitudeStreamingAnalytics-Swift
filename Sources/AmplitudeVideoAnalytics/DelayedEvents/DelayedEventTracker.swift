@@ -22,7 +22,7 @@ final class DelayedEventTracker {
     private var timer: PulseTimer!
 
     init(amplitudeConfiguration: Configuration,
-         configuration: DelayedEventsConfiguration = DelayedEventsConfiguration(),
+         configuration: DelayedEventsConfiguration,
          httpClient: DelayedEventsUploading) {
         self.amplitudeConfiguration = amplitudeConfiguration
         self.configuration = configuration
@@ -146,11 +146,11 @@ final class DelayedEventTracker {
             }
             if flushing || entry.kind == .instant { settledIds.append(insertId) }
         }
-        // `delayTimeoutMs` keeps the row alive; 0 has the server ingest and delete it.
-        let timeout: Int64 = (flushing || delayedEvents.isEmpty) ? 0 : configuration.delayTimeoutMs
+        // The TTL keeps the row alive; 0 has the server ingest and delete it.
+        let ttlMs: Int64 = (flushing || delayedEvents.isEmpty) ? 0 : configuration.ttlMs
         let body = DelayedRequestBody(apiKey: amplitudeConfiguration.apiKey,
                                       id: delayId,
-                                      timeout: timeout,
+                                      ttlMs: ttlMs,
                                       events: delayedEvents,
                                       instantEvents: instantEvents.isEmpty ? nil : instantEvents)
         return (body, settledIds)

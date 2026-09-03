@@ -39,7 +39,7 @@ final class DelayedEventsHttpClientTests: XCTestCase {
         let event = BaseEvent(eventType: "Video Content Stopped")
         event.insertId = "ins-1"
         event.timestamp = 1_752_000_000_000
-        let body = DelayedRequestBody(apiKey: "k", id: "d-1", timeout: 3_600_000,
+        let body = DelayedRequestBody(apiKey: "k", id: "d-1", ttlMs: 3_600_000,
                                       events: [event], instantEvents: nil)
         // swiftlint:disable:next force_cast
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as! [String: Any]
@@ -74,7 +74,7 @@ final class DelayedEventsHttpClientTests: XCTestCase {
     }
 
     private func makeBody() -> DelayedRequestBody {
-        DelayedRequestBody(apiKey: "test-key", id: "d-1", timeout: 3_600_000,
+        DelayedRequestBody(apiKey: "test-key", id: "d-1", ttlMs: 3_600_000,
                            events: [BaseEvent(eventType: "Video Content Stopped")], instantEvents: nil)
     }
 

@@ -43,7 +43,7 @@ final class DelayedEventTrackerTests: XCTestCase {
     }
 
     func testTrackAndTrackDelayedCoalesceIntoOneUpload() {
-        let tracker = makeTracker(delayTimeoutMs: 1_234)
+        let tracker = makeTracker(ttlMs: 1_234)
         // An in-flight request holds both tracks below until they can share one.
         uploader.autoSettle = nil
         tracker.track(makeDelayed("warmup"))
@@ -57,7 +57,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 2) }
         XCTAssertEqual(uploader.bodies[1].instantEvents?.compactMap(\.insertId), ["start"])
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["warmup", "stop"])
-        XCTAssertEqual(uploader.bodies[1].timeout, 1_234)
+        XCTAssertEqual(uploader.bodies[1].ttlMs, 1_234)
     }
 
     /// A refresh replaces the entry without sending, so it surfaces on the next request out.
@@ -76,17 +76,17 @@ final class DelayedEventTrackerTests: XCTestCase {
         XCTAssertEqual(events.first?.eventType, "Second")
     }
 
-    func testTimeoutIsDelayTimeoutWhenDelayedEntriesPresentAndZeroForInstantsOnly() {
-        let tracker = makeTracker(delayTimeoutMs: 1_234)
+    func testTtlIsSentWithDelayedEntriesAndZeroForInstantsOnly() {
+        let tracker = makeTracker(ttlMs: 1_234)
         tracker.track(makeInstant("i"))
         waitForUploads(1)
-        XCTAssertEqual(uploader.bodies[0].timeout, 0)
+        XCTAssertEqual(uploader.bodies[0].ttlMs, 0)
         XCTAssertTrue(uploader.bodies[0].events.isEmpty)
         XCTAssertEqual(uploader.bodies[0].instantEvents?.compactMap(\.insertId), ["i"])
 
         tracker.track(makeDelayed("d"))
         waitForUploads(2)
-        XCTAssertEqual(uploader.bodies[1].timeout, 1_234)
+        XCTAssertEqual(uploader.bodies[1].ttlMs, 1_234)
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["d"])
         // "i" settled with the first request, so it is not carried a second time.
         XCTAssertNil(uploader.bodies[1].instantEvents)
@@ -269,7 +269,7 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     private func assertFlushDropsEntries(settlingWith result: Result<DelayedResponseBody, Error>) {
         uploader.autoSettle = result
-        let tracker = makeTracker(delayTimeoutMs: 1_234)
+        let tracker = makeTracker(ttlMs: 1_234)
         tracker.track(makeDelayed("a"))
         waitForUploads(1)
         tracker.track(makeDelayed("b"))
@@ -277,7 +277,7 @@ final class DelayedEventTrackerTests: XCTestCase {
 
         tracker.flush()
         waitForUploads(3)
-        XCTAssertEqual(uploader.bodies[2].timeout, 0)
+        XCTAssertEqual(uploader.bodies[2].ttlMs, 0)
         XCTAssertEqual(uploader.bodies[2].events.compactMap(\.insertId), ["a", "b"])
 
         tracker.track(makeDelayed("c"))
@@ -335,19 +335,19 @@ final class DelayedEventTrackerTests: XCTestCase {
     }
 
     func testFlushOnEmptySetDoesNotFinalizeALaterEvent() {
-        let tracker = makeTracker(delayTimeoutMs: 1_234)
+        let tracker = makeTracker(ttlMs: 1_234)
         tracker.flush()
         expectNoUpload(beyond: 0)
 
         tracker.track(makeDelayed("a"))
         waitForUploads(1)
-        XCTAssertEqual(uploader.bodies[0].timeout, 1_234)
+        XCTAssertEqual(uploader.bodies[0].ttlMs, 1_234)
         XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["a"])
     }
 
     func testDeferredFlushIsDroppedWhenTheEarlierOneDrainsEverything() {
         uploader.autoSettle = nil
-        let tracker = makeTracker(delayTimeoutMs: 1_234)
+        let tracker = makeTracker(ttlMs: 1_234)
         tracker.track(makeDelayed("a"))
         waitForUploads(1)
         uploader.settle(at: 0, with: ok)
@@ -359,7 +359,7 @@ final class DelayedEventTrackerTests: XCTestCase {
 
         tracker.track(makeDelayed("b"))
         waitForUploads(3)
-        XCTAssertEqual(uploader.bodies[2].timeout, 1_234)
+        XCTAssertEqual(uploader.bodies[2].ttlMs, 1_234)
         XCTAssertEqual(uploader.bodies[2].events.compactMap(\.insertId), ["b"])
     }
 
@@ -390,7 +390,7 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testFlushIsSentOnlyAfterTheInFlightRequestSettles() {
         uploader.autoSettle = nil
-        let tracker = makeTracker(delayTimeoutMs: 1_234)
+        let tracker = makeTracker(ttlMs: 1_234)
         tracker.track(makeDelayed("a"))
         waitForUploads(1)
 
@@ -400,7 +400,7 @@ final class DelayedEventTrackerTests: XCTestCase {
 
         uploader.settle(at: 0, with: ok)
         waitForUploads(2)
-        XCTAssertEqual(uploader.bodies[1].timeout, 0)
+        XCTAssertEqual(uploader.bodies[1].ttlMs, 0)
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["a"])
     }
 
@@ -421,14 +421,14 @@ final class DelayedEventTrackerTests: XCTestCase {
     // MARK: - sendNow
 
     func testRefreshMarkedSendNowDoesNotWaitForThePulse() {
-        let tracker = makeTracker(delayTimeoutMs: 1_234)
+        let tracker = makeTracker(ttlMs: 1_234)
         tracker.track(makeDelayed("a", type: "First"))
         waitForUploads(1)
 
         tracker.track(makeDelayed("a", type: "Second", sendNow: true))
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second"])
-        XCTAssertEqual(uploader.bodies[1].timeout, 1_234, "the row keeps its TTL")
+        XCTAssertEqual(uploader.bodies[1].ttlMs, 1_234, "the row keeps its TTL")
     }
 
     /// The send belongs to the refresh: if the refresh is not admitted there is nothing to send.
@@ -495,11 +495,11 @@ final class DelayedEventTrackerTests: XCTestCase {
     }
 
     private func makeTracker(pulseInterval: TimeInterval = 60,
-                             delayTimeoutMs: Int64 = 3_600_000,
+                             ttlMs: Int64 = 3_600_000,
                              eventsSizeLimit: Int = 40_000) -> DelayedEventTracker {
         DelayedEventTracker(amplitudeConfiguration: Configuration(apiKey: "test-key"),
                             configuration: DelayedEventsConfiguration(pulseInterval: pulseInterval,
-                                                                      delayTimeoutMs: delayTimeoutMs,
+                                                                      ttlMs: ttlMs,
                                                                       eventsSizeLimit: eventsSizeLimit),
                             httpClient: uploader)
     }

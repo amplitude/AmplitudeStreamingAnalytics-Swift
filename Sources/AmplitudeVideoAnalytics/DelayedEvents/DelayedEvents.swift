@@ -9,19 +9,20 @@ final class DelayedEvents: BeforePlugin {
     let configuration: DelayedEventsConfiguration
     private let tracker: DelayedEventTracker
 
-    convenience init(amplitude: Amplitude) {
-        self.init(amplitude: amplitude, httpClient: nil, configuration: DelayedEventsConfiguration())
+    /// Uploads over the real endpoint; the full init is for a test double.
+    convenience init(amplitude: Amplitude, configuration: DelayedEventsConfiguration) {
+        self.init(amplitude: amplitude,
+                  httpClient: DelayedEventsHttpClient(configuration: amplitude.configuration),
+                  configuration: configuration)
     }
 
     init(amplitude: Amplitude,
-         httpClient: DelayedEventsUploading?,
+         httpClient: DelayedEventsUploading,
          configuration: DelayedEventsConfiguration) {
-        let amplitudeConfiguration = amplitude.configuration
         self.configuration = configuration
-        tracker = DelayedEventTracker(
-            amplitudeConfiguration: amplitudeConfiguration,
-            configuration: configuration,
-            httpClient: httpClient ?? DelayedEventsHttpClient(configuration: amplitudeConfiguration))
+        tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
+                                      configuration: configuration,
+                                      httpClient: httpClient)
         super.init()
         amplitude.add(plugin: self)
     }

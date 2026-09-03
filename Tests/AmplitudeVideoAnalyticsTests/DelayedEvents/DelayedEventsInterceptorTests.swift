@@ -115,13 +115,13 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertFalse(spy.seen.contains("Content Stopped"))
     }
 
-    func testFacadeCarriesTheConfiguredTimeoutOntoTheWire() {
-        makeFacade(configuration: DelayedEventsConfiguration(delayTimeoutMs: 1_234))
+    func testFacadeCarriesTheConfiguredTtlOntoTheWire() {
+        makeFacade(configuration: DelayedEventsConfiguration(ttlMs: 1_234))
         delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed))
         waitForUploads(1)
 
-        XCTAssertEqual(uploader.bodies[0].timeout, 1_234)
-        XCTAssertEqual(delayedEvents.configuration.delayTimeoutMs, 1_234)
+        XCTAssertEqual(uploader.bodies[0].ttlMs, 1_234)
+        XCTAssertEqual(delayedEvents.configuration.ttlMs, 1_234)
     }
 
     /// Deterministic where a separate "send now" call would not be: the request is asked for by the
@@ -136,7 +136,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
                                          sendNow: true))
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second"])
-        XCTAssertNotEqual(uploader.bodies[1].timeout, 0, "nothing is finalized")
+        XCTAssertNotEqual(uploader.bodies[1].ttlMs, 0, "nothing is finalized")
     }
 
     func testFacadeFlushFinalizesTheRow() {
@@ -147,7 +147,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         delayedEvents.flush()
         waitForUploads(2)
 
-        XCTAssertEqual(uploader.bodies[1].timeout, 0)
+        XCTAssertEqual(uploader.bodies[1].ttlMs, 0)
     }
 
     func testFacadeDiscardRotatesTheDelayId() {
