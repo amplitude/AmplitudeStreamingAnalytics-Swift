@@ -26,8 +26,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
     func testDelayedEventIsSwallowedAndHandedToTheTransport() {
         makeFacade()
 
-        let event = DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed)
-        event.markForcePulse()
+        let event = DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed, forcePulse: true)
 
         XCTAssertNil(delayedEvents.execute(event: event))
 
@@ -76,8 +75,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
     }
 
     func testRoutingFieldsAreNotEncoded() throws {
-        let delayed = DelayedEvent(wrapping: makeEvent("a"), kind: .delayed)
-        delayed.markForcePulse()
+        let delayed = DelayedEvent(wrapping: makeEvent("a"), kind: .delayed, forcePulse: true)
 
         let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(delayed))
         let fields = try XCTUnwrap(encoded as? [String: Any])
@@ -140,6 +138,21 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second"])
         XCTAssertNotEqual(uploader.bodies[1].ttlMs, 0, "nothing is finalized")
+    }
+
+    /// Forcing re-wraps, because the flag is `let`. The copy has to keep what the transport routes on.
+    func testForcedTrackKeepsTheEventsIdentityAndLane() {
+        makeFacade()
+        let event = DelayedEvent(wrapping: makeEvent("ins-1"), kind: .instant)
+        event.timestamp = 1_752_000_000_000
+
+        delayedEvents.track(event, forcePulse: true)
+        waitForUploads(1)
+
+        let sent = uploader.bodies[0].instantEvents?.first
+        XCTAssertEqual(sent?.insertId, "ins-1", "identity survives the copy")
+        XCTAssertEqual(sent?.timestamp, 1_752_000_000_000)
+        XCTAssertTrue(uploader.bodies[0].events.isEmpty, "and so does the lane")
     }
 
     func testFacadeFlushFinalizesTheRow() {

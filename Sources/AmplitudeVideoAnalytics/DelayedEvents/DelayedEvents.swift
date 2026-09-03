@@ -31,10 +31,10 @@ final class DelayedEvents: BeforePlugin {
     /// Nothing goes out on its own: `forcePulse` is what sends the live set off schedule, and it
     /// rides the event through the host timeline so it cannot arrive ahead of what it belongs to.
     func track(_ event: DelayedEvent, forcePulse: Bool = false) {
-        if forcePulse {
-            event.markForcePulse()
-        }
-        amplitude?.track(event: event)
+        let tracked = forcePulse
+            ? DelayedEvent(wrapping: event, kind: event.kind, forcePulse: true)
+            : event
+        amplitude?.track(event: tracked)
     }
 
     func flush() {

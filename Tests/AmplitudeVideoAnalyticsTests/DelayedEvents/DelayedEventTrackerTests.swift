@@ -528,17 +528,13 @@ final class DelayedEventTrackerTests: XCTestCase {
     private func makeDelayed(_ insertId: String,
                              type: String = "Content Playing",
                              forcePulse: Bool = true) -> DelayedEvent {
-        let event = DelayedEvent(wrapping: makeEvent(insertId, type: type), kind: .delayed)
-        if forcePulse { event.markForcePulse() }
-        return event
+        DelayedEvent(wrapping: makeEvent(insertId, type: type), kind: .delayed, forcePulse: forcePulse)
     }
 
     private func makeInstant(_ insertId: String,
                              type: String = "Content Playing",
                              forcePulse: Bool = true) -> DelayedEvent {
-        let event = DelayedEvent(wrapping: makeEvent(insertId, type: type), kind: .instant)
-        if forcePulse { event.markForcePulse() }
-        return event
+        DelayedEvent(wrapping: makeEvent(insertId, type: type), kind: .instant, forcePulse: forcePulse)
     }
 
     private func makeEvent(_ insertId: String, type: String = "Content Playing") -> BaseEvent {
