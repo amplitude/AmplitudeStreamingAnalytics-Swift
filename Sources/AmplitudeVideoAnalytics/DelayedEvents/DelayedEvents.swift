@@ -27,7 +27,11 @@ final class DelayedEvents: BeforePlugin {
         amplitude.add(plugin: self)
     }
 
-    func track(_ event: DelayedEvent) {
+    /// `forcePulse` asks the transport to send as soon as this event reaches it, rather than leaving
+    /// a refreshed entry to the next pulse. It rides the event through the host timeline, so it
+    /// cannot arrive ahead of the refresh it belongs to — a separate "send now" call can, and does.
+    func track(_ event: DelayedEvent, forcePulse: Bool = false) {
+        event.forcePulse = forcePulse
         amplitude?.track(event: event)
     }
 

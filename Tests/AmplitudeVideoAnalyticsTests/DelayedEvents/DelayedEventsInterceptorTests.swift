@@ -73,12 +73,13 @@ final class DelayedEventsInterceptorTests: XCTestCase {
     }
 
     func testRoutingFieldsAreNotEncoded() throws {
-        let delayed = DelayedEvent(wrapping: makeEvent("a"), kind: .delayed, sendNow: true)
+        let delayed = DelayedEvent(wrapping: makeEvent("a"), kind: .delayed)
+        delayed.forcePulse = true
 
         let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(delayed))
         let fields = try XCTUnwrap(encoded as? [String: Any])
         XCTAssertNil(fields["kind"])
-        XCTAssertNil(fields["sendNow"])
+        XCTAssertNil(fields["forcePulse"])
         XCTAssertEqual(fields["insert_id"] as? String, "a")
     }
 
@@ -126,14 +127,13 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     /// Deterministic where a separate "send now" call would not be: the request is asked for by the
     /// refresh itself, so it cannot overtake it across the timeline hop.
-    func testFacadeRefreshMarkedSendNowGoesOutWithTheRefreshedValue() {
+    func testFacadeRefreshWithForcePulseGoesOutWithTheRefreshedValue() {
         makeFacade()
         delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed))
         waitForUploads(1)
 
-        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "Second"),
-                                         kind: .delayed,
-                                         sendNow: true))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "Second"), kind: .delayed),
+                            forcePulse: true)
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second"])
         XCTAssertNotEqual(uploader.bodies[1].ttlMs, 0, "nothing is finalized")

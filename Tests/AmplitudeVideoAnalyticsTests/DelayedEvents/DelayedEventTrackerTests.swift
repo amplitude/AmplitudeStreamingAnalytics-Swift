@@ -418,27 +418,29 @@ final class DelayedEventTrackerTests: XCTestCase {
         XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second", "Content Playing"])
     }
 
-    // MARK: - sendNow
+    // MARK: - forcePulse
 
-    func testRefreshMarkedSendNowDoesNotWaitForThePulse() {
+    func testRefreshWithForcePulseDoesNotWaitForThePulse() {
         let tracker = makeTracker(ttlMs: 1_234)
         tracker.track(makeDelayed("a", type: "First"))
         waitForUploads(1)
 
-        tracker.track(makeDelayed("a", type: "Second", sendNow: true))
+        tracker.track(makeDelayed("a", type: "Second", forcePulse: true))
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second"])
         XCTAssertEqual(uploader.bodies[1].ttlMs, 1_234, "the row keeps its TTL")
     }
 
-    /// The send belongs to the refresh: if the refresh is not admitted there is nothing to send.
-    func testSendNowOnARejectedRefreshSendsNothing() {
+    /// The send is asked for by the track, not by a successful upsert. A refresh rejected for size
+    /// still issues the request — carrying the value the server already had, not the rejected one.
+    func testForcePulseOnARejectedRefreshStillSends() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a", type: "First"))
         waitForUploads(1)
 
-        tracker.track(makeDelayed("a", type: oversizedEventType, sendNow: true))
-        expectNoUpload(beyond: 1)
+        tracker.track(makeDelayed("a", type: oversizedEventType, forcePulse: true))
+        waitForUploads(2)
+        XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["First"], "the admitted value survives")
     }
 
     // MARK: - discard / empty state
@@ -506,8 +508,10 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     private func makeDelayed(_ insertId: String,
                              type: String = "Content Playing",
-                             sendNow: Bool = false) -> DelayedEvent {
-        DelayedEvent(wrapping: makeEvent(insertId, type: type), kind: .delayed, sendNow: sendNow)
+                             forcePulse: Bool = false) -> DelayedEvent {
+        let event = DelayedEvent(wrapping: makeEvent(insertId, type: type), kind: .delayed)
+        event.forcePulse = forcePulse
+        return event
     }
 
     private func makeInstant(_ insertId: String, type: String = "Content Playing") -> DelayedEvent {
