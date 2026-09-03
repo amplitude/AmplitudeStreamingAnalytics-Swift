@@ -20,7 +20,7 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testEventWithoutInsertIdIsRejected() {
         let tracker = makeTracker()
-        tracker.track(DelayedEvent(wrapping: BaseEvent(eventType: "Content Playing"), kind: .delayed))
+        tracker.track(DelayedEvent(copying: BaseEvent(eventType: "Content Playing"), kind: .delayed))
         expectNoUpload(beyond: 0)
 
         tracker.track(makeDelayed("a"))
@@ -130,7 +130,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         tracker.track(makeDelayed("a"))
         waitForUploads(1)
 
-        tracker.track(makeDelayed("big", type: oversizedEventType, forcePulse: false))
+        tracker.track(makeDelayed("big", type: oversizedEventType))
         expectNoUpload(beyond: 1)
 
         tracker.track(makeDelayed("c"))
@@ -147,7 +147,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         tracker.track(makeDelayed("b"))
         waitForUploads(2)
 
-        tracker.track(makeDelayed("a", type: oversizedEventType, forcePulse: false))
+        tracker.track(makeDelayed("a", type: oversizedEventType))
         expectNoUpload(beyond: 2)
 
         tracker.track(makeDelayed("c"))
@@ -164,7 +164,7 @@ final class DelayedEventTrackerTests: XCTestCase {
             waitForUploads(index + 1)
         }
 
-        tracker.track(makeDelayed("e", type: filler, forcePulse: false))
+        tracker.track(makeDelayed("e", type: filler))
         expectNoUpload(beyond: 4)
 
         tracker.track(makeDelayed("f"))
@@ -178,7 +178,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         waitForUploads(1)
 
         // Well under the 40 kB default, over the limit this tracker was given.
-        tracker.track(makeDelayed("b", type: String(repeating: "x", count: 3_000), forcePulse: false))
+        tracker.track(makeDelayed("b", type: String(repeating: "x", count: 3_000)))
         expectNoUpload(beyond: 1)
     }
 
@@ -189,7 +189,7 @@ final class DelayedEventTrackerTests: XCTestCase {
 
         let bad = makeEvent("bad")
         bad.eventProperties = ["duration": Double.nan]
-        tracker.track(DelayedEvent(wrapping: bad, kind: .delayed))
+        tracker.track(DelayedEvent(copying: bad, kind: .delayed))
         expectNoUpload(beyond: 1)
 
         tracker.track(makeDelayed("c"))
@@ -249,7 +249,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         tracker.track(makeDelayed("a", type: "First"))
         waitForUploads(1)
 
-        tracker.track(makeDelayed("a", type: oversizedEventType, forcePulse: false))
+        tracker.track(makeDelayed("a", type: oversizedEventType))
         expectNoUpload(beyond: 1)
 
         tracker.track(makeDelayed("b"))
@@ -448,16 +448,14 @@ final class DelayedEventTrackerTests: XCTestCase {
         XCTAssertEqual(uploader.bodies[1].ttlMs, 1_234, "the row keeps its TTL")
     }
 
-    /// The send is asked for by the track, not by a successful upsert. A refresh rejected for size
-    /// still issues the request — carrying the value the server already had, not the rejected one.
-    func testForcePulseOnARejectedRefreshStillSends() {
+    /// The send belongs to the entry, not to the call: a refresh that is not admitted sends nothing.
+    func testForcePulseOnARejectedRefreshSendsNothing() {
         let tracker = makeTracker()
         tracker.track(makeDelayed("a", type: "First"))
         waitForUploads(1)
 
         tracker.track(makeDelayed("a", type: oversizedEventType, forcePulse: true))
-        waitForUploads(2)
-        XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["First"], "the admitted value survives")
+        expectNoUpload(beyond: 1)
     }
 
     // MARK: - discard / empty state
@@ -528,13 +526,17 @@ final class DelayedEventTrackerTests: XCTestCase {
     private func makeDelayed(_ insertId: String,
                              type: String = "Content Playing",
                              forcePulse: Bool = true) -> DelayedEvent {
-        DelayedEvent(wrapping: makeEvent(insertId, type: type), kind: .delayed, forcePulse: forcePulse)
+        let event = DelayedEvent(copying: makeEvent(insertId, type: type), kind: .delayed)
+        if forcePulse { event.markForcePulse() }
+        return event
     }
 
     private func makeInstant(_ insertId: String,
                              type: String = "Content Playing",
                              forcePulse: Bool = true) -> DelayedEvent {
-        DelayedEvent(wrapping: makeEvent(insertId, type: type), kind: .instant, forcePulse: forcePulse)
+        let event = DelayedEvent(copying: makeEvent(insertId, type: type), kind: .instant)
+        if forcePulse { event.markForcePulse() }
+        return event
     }
 
     private func makeEvent(_ insertId: String, type: String = "Content Playing") -> BaseEvent {

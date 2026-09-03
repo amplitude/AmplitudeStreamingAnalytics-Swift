@@ -9,7 +9,6 @@ final class DelayedEvents: BeforePlugin {
     let configuration: DelayedEventsConfiguration
     private let tracker: DelayedEventTracker
 
-    /// Tracks over the real endpoint; the full init takes a tracker a test can build on a double.
     convenience init(amplitude: Amplitude, configuration: DelayedEventsConfiguration) {
         let httpClient = DelayedEventsHttpClient(configuration: amplitude.configuration)
         self.init(amplitude: amplitude,
@@ -28,13 +27,11 @@ final class DelayedEvents: BeforePlugin {
         amplitude.add(plugin: self)
     }
 
-    /// Nothing goes out on its own: `forcePulse` is what sends the live set off schedule, and it
-    /// rides the event through the host timeline so it cannot arrive ahead of what it belongs to.
     func track(_ event: DelayedEvent, forcePulse: Bool = false) {
-        let tracked = forcePulse
-            ? DelayedEvent(wrapping: event, kind: event.kind, forcePulse: true)
-            : event
-        amplitude?.track(event: tracked)
+        if forcePulse {
+            event.markForcePulse()
+        }
+        amplitude?.track(event: event)
     }
 
     func flush() {

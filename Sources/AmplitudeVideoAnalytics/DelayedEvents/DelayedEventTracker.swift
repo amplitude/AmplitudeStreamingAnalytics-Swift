@@ -46,9 +46,6 @@ final class DelayedEventTracker {
             } else {
                 self.add(event, insertId: insertId)
             }
-            if event.forcePulse {
-                self.setNeedsSend()
-            }
         }
     }
 
@@ -56,6 +53,9 @@ final class DelayedEventTracker {
         // A rejected refresh leaves the live entry standing; no send, it rides the next pulse.
         guard let entry = admissibleEntry(event, insertId: insertId) else { return }
         entries.upsert(entry, for: insertId)
+        if event.forcePulse {
+            setNeedsSend()
+        }
     }
 
     func flush() {
@@ -76,12 +76,13 @@ final class DelayedEventTracker {
         }
     }
 
-    /// Admission only. Whether this goes out now or on the next pulse is the caller's call,
-    /// carried by `forcePulse`.
     private func add(_ event: DelayedEvent, insertId: String) {
         if let entry = admissibleEntry(event, insertId: insertId) {
             entries.upsert(entry, for: insertId)
             timer.resume()
+            if event.forcePulse {
+                setNeedsSend()
+            }
         } else {
             suspendPulseIfIdle()
         }
