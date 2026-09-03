@@ -46,7 +46,6 @@ final class DelayedEventTracker {
             } else {
                 self.add(event, insertId: insertId)
             }
-            // A refresh otherwise waits for the pulse. No-op on an add, which already asked to send.
             if event.forcePulse {
                 self.setNeedsSend()
             }
@@ -77,11 +76,12 @@ final class DelayedEventTracker {
         }
     }
 
+    /// Admission only. Whether this goes out now or on the next pulse is the caller's call,
+    /// carried by `forcePulse`.
     private func add(_ event: DelayedEvent, insertId: String) {
         if let entry = admissibleEntry(event, insertId: insertId) {
             entries.upsert(entry, for: insertId)
             timer.resume()
-            setNeedsSend()
         } else {
             suspendPulseIfIdle()
         }

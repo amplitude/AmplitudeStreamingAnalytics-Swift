@@ -26,7 +26,10 @@ final class DelayedEventsInterceptorTests: XCTestCase {
     func testDelayedEventIsSwallowedAndHandedToTheTransport() {
         makeFacade()
 
-        XCTAssertNil(delayedEvents.execute(event: DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed)))
+        let event = DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed)
+        event.markForcePulse()
+
+        XCTAssertNil(delayedEvents.execute(event: event))
 
         waitForUploads(1)
         XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["ins-1"])
@@ -58,12 +61,12 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     func testRefreshingAnEntryReplacesItInPlace() {
         makeFacade()
-        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed), forcePulse: true)
         waitForUploads(1)
 
         // A refresh rides the next request rather than sending one of its own.
         delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "Second"), kind: .delayed))
-        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-2"), kind: .delayed))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-2"), kind: .delayed), forcePulse: true)
         waitForUploads(2)
 
         let events = uploader.bodies[1].events
@@ -74,7 +77,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     func testRoutingFieldsAreNotEncoded() throws {
         let delayed = DelayedEvent(wrapping: makeEvent("a"), kind: .delayed)
-        delayed.forcePulse = true
+        delayed.markForcePulse()
 
         let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(delayed))
         let fields = try XCTUnwrap(encoded as? [String: Any])
@@ -92,7 +95,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         let event = makeEvent("ins-1")
         event.timestamp = 1_752_000_000_000
 
-        delayedEvents.track(DelayedEvent(wrapping: event, kind: .delayed))
+        delayedEvents.track(DelayedEvent(wrapping: event, kind: .delayed), forcePulse: true)
         waitForUploads(1)
 
         let sent = uploader.bodies[0].events[0]
@@ -109,7 +112,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         makeFacade(enrichment: spy)
 
         amplitude.track(event: makeEvent("ins-0", type: "Regular Event"))
-        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed), forcePulse: true)
         waitForUploads(1)
 
         XCTAssertTrue(spy.seen.contains("Regular Event"), "the spy must be reached by ordinary events")
@@ -118,7 +121,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     func testFacadeCarriesTheConfiguredTtlOntoTheWire() {
         makeFacade(configuration: DelayedEventsConfiguration(ttlMs: 1_234))
-        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed), forcePulse: true)
         waitForUploads(1)
 
         XCTAssertEqual(uploader.bodies[0].ttlMs, 1_234)
@@ -129,7 +132,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
     /// refresh itself, so it cannot overtake it across the timeline hop.
     func testFacadeRefreshWithForcePulseGoesOutWithTheRefreshedValue() {
         makeFacade()
-        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "First"), kind: .delayed), forcePulse: true)
         waitForUploads(1)
 
         delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1", type: "Second"), kind: .delayed),
@@ -141,7 +144,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     func testFacadeFlushFinalizesTheRow() {
         makeFacade()
-        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed), forcePulse: true)
         waitForUploads(1)
 
         delayedEvents.flush()
@@ -152,11 +155,11 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     func testFacadeDiscardRotatesTheDelayId() {
         makeFacade()
-        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed), forcePulse: true)
         waitForUploads(1)
 
         delayedEvents.discard()
-        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-2"), kind: .delayed))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-2"), kind: .delayed), forcePulse: true)
         waitForUploads(2)
 
         XCTAssertNotEqual(uploader.bodies[0].id, uploader.bodies[1].id)
@@ -174,7 +177,10 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         if let enrichment {
             amplitude.add(plugin: enrichment)
         }
-        delayedEvents = DelayedEvents(amplitude: amplitude, httpClient: uploader, configuration: configuration)
+        let tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
+                                          configuration: configuration,
+                                          httpClient: uploader)
+        delayedEvents = DelayedEvents(amplitude: amplitude, configuration: configuration, tracker: tracker)
     }
 
     private func makeEvent(_ insertId: String, type: String = "Content Stopped") -> BaseEvent {

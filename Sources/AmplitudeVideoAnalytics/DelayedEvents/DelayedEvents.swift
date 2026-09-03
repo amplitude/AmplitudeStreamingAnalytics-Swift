@@ -9,29 +9,31 @@ final class DelayedEvents: BeforePlugin {
     let configuration: DelayedEventsConfiguration
     private let tracker: DelayedEventTracker
 
-    /// Uploads over the real endpoint; the full init is for a test double.
+    /// Tracks over the real endpoint; the full init takes a tracker a test can build on a double.
     convenience init(amplitude: Amplitude, configuration: DelayedEventsConfiguration) {
+        let httpClient = DelayedEventsHttpClient(configuration: amplitude.configuration)
         self.init(amplitude: amplitude,
-                  httpClient: DelayedEventsHttpClient(configuration: amplitude.configuration),
-                  configuration: configuration)
+                  configuration: configuration,
+                  tracker: DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
+                                               configuration: configuration,
+                                               httpClient: httpClient))
     }
 
     init(amplitude: Amplitude,
-         httpClient: DelayedEventsUploading,
-         configuration: DelayedEventsConfiguration) {
+         configuration: DelayedEventsConfiguration,
+         tracker: DelayedEventTracker) {
         self.configuration = configuration
-        tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
-                                      configuration: configuration,
-                                      httpClient: httpClient)
+        self.tracker = tracker
         super.init()
         amplitude.add(plugin: self)
     }
 
-    /// `forcePulse` asks the transport to send as soon as this event reaches it, rather than leaving
-    /// a refreshed entry to the next pulse. It rides the event through the host timeline, so it
-    /// cannot arrive ahead of the refresh it belongs to — a separate "send now" call can, and does.
+    /// Nothing goes out on its own: `forcePulse` is what sends the live set off schedule, and it
+    /// rides the event through the host timeline so it cannot arrive ahead of what it belongs to.
     func track(_ event: DelayedEvent, forcePulse: Bool = false) {
-        event.forcePulse = forcePulse
+        if forcePulse {
+            event.markForcePulse()
+        }
         amplitude?.track(event: event)
     }
 
