@@ -418,6 +418,29 @@ final class DelayedEventTrackerTests: XCTestCase {
         XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second", "Content Playing"])
     }
 
+    // MARK: - sendNow
+
+    func testRefreshMarkedSendNowDoesNotWaitForThePulse() {
+        let tracker = makeTracker(delayTimeoutMs: 1_234)
+        tracker.track(makeDelayed("a", type: "First"))
+        waitForUploads(1)
+
+        tracker.track(makeDelayed("a", type: "Second", sendNow: true))
+        waitForUploads(2)
+        XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second"])
+        XCTAssertEqual(uploader.bodies[1].timeout, 1_234, "the row keeps its TTL")
+    }
+
+    /// The send belongs to the refresh: if the refresh is not admitted there is nothing to send.
+    func testSendNowOnARejectedRefreshSendsNothing() {
+        let tracker = makeTracker()
+        tracker.track(makeDelayed("a"))
+        waitForUploads(1)
+
+        tracker.track(makeDelayed("a", type: oversizedEventType, sendNow: true))
+        expectNoUpload(beyond: 1)
+    }
+
     // MARK: - discard / empty state
 
     func testDiscardClearsStateAndSendsNothing() {
@@ -481,8 +504,10 @@ final class DelayedEventTrackerTests: XCTestCase {
                             httpClient: uploader)
     }
 
-    private func makeDelayed(_ insertId: String, type: String = "Content Playing") -> DelayedEvent {
-        DelayedEvent(wrapping: makeEvent(insertId, type: type), kind: .delayed)
+    private func makeDelayed(_ insertId: String,
+                             type: String = "Content Playing",
+                             sendNow: Bool = false) -> DelayedEvent {
+        DelayedEvent(wrapping: makeEvent(insertId, type: type), kind: .delayed, sendNow: sendNow)
     }
 
     private func makeInstant(_ insertId: String, type: String = "Content Playing") -> DelayedEvent {
