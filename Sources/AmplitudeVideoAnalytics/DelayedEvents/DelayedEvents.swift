@@ -9,9 +9,13 @@ final class DelayedEvents: BeforePlugin {
     let configuration: DelayedEventsConfiguration
     private let tracker: DelayedEventTracker
 
+    convenience init(amplitude: Amplitude) {
+        self.init(amplitude: amplitude, httpClient: nil, configuration: DelayedEventsConfiguration())
+    }
+
     init(amplitude: Amplitude,
-         httpClient: DelayedEventsUploading? = nil,
-         configuration: DelayedEventsConfiguration = DelayedEventsConfiguration()) {
+         httpClient: DelayedEventsUploading?,
+         configuration: DelayedEventsConfiguration) {
         let amplitudeConfiguration = amplitude.configuration
         self.configuration = configuration
         tracker = DelayedEventTracker(
