@@ -172,6 +172,16 @@ final class DelayedEventTrackerTests: XCTestCase {
         XCTAssertEqual(uploader.bodies[4].events.compactMap(\.insertId), ["a", "b", "c", "d", "f"])
     }
 
+    func testConfiguredSizeLimitReplacesTheDefaultOne() {
+        let tracker = makeTracker(eventsSizeLimit: 2_000)
+        tracker.track(makeDelayed("a"))
+        waitForUploads(1)
+
+        // Well under the 40 kB default, over the limit this tracker was given.
+        tracker.track(makeDelayed("b", type: String(repeating: "x", count: 3_000)))
+        expectNoUpload(beyond: 1)
+    }
+
     func testUnencodableEventIsRejectedAndKeepsPriorState() {
         let tracker = makeTracker()
         tracker.track(makeDelayed("a"))
@@ -462,11 +472,13 @@ final class DelayedEventTrackerTests: XCTestCase {
     }
 
     private func makeTracker(pulseInterval: TimeInterval = 60,
-                             delayTimeoutMs: Int64 = 3_600_000) -> DelayedEventTracker {
-        DelayedEventTracker(configuration: Configuration(apiKey: "test-key"),
-                            httpClient: uploader,
-                            pulseInterval: pulseInterval,
-                            delayTimeoutMs: delayTimeoutMs)
+                             delayTimeoutMs: Int64 = 3_600_000,
+                             eventsSizeLimit: Int = 40_000) -> DelayedEventTracker {
+        DelayedEventTracker(amplitudeConfiguration: Configuration(apiKey: "test-key"),
+                            configuration: DelayedEventsConfiguration(pulseInterval: pulseInterval,
+                                                                      delayTimeoutMs: delayTimeoutMs,
+                                                                      eventsSizeLimit: eventsSizeLimit),
+                            httpClient: uploader)
     }
 
     private func makeDelayed(_ insertId: String, type: String = "Content Playing") -> DelayedEvent {

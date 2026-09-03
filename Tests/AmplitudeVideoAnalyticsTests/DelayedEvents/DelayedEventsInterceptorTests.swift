@@ -114,6 +114,15 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertFalse(spy.seen.contains("Content Stopped"))
     }
 
+    func testFacadeCarriesTheConfiguredTimeoutOntoTheWire() {
+        makeFacade(configuration: DelayedEventsConfiguration(delayTimeoutMs: 1_234))
+        delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed))
+        waitForUploads(1)
+
+        XCTAssertEqual(uploader.bodies[0].timeout, 1_234)
+        XCTAssertEqual(delayedEvents.configuration.delayTimeoutMs, 1_234)
+    }
+
     func testFacadeFlushFinalizesTheRow() {
         makeFacade()
         delayedEvents.track(DelayedEvent(wrapping: makeEvent("ins-1"), kind: .delayed))
@@ -140,7 +149,8 @@ final class DelayedEventsInterceptorTests: XCTestCase {
     // MARK: - helpers
 
     /// Offline and without autocapture, so only the delayed transport sees traffic.
-    private func makeFacade(enrichment: SpyEnrichmentPlugin? = nil) {
+    private func makeFacade(enrichment: SpyEnrichmentPlugin? = nil,
+                            configuration: DelayedEventsConfiguration = DelayedEventsConfiguration()) {
         amplitude = Amplitude(configuration: Configuration(apiKey: "facade-\(UUID().uuidString)",
                                                            instanceName: "facade-\(UUID().uuidString)",
                                                            autocapture: [],
@@ -148,7 +158,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         if let enrichment {
             amplitude.add(plugin: enrichment)
         }
-        delayedEvents = DelayedEvents(amplitude: amplitude, httpClient: uploader)
+        delayedEvents = DelayedEvents(amplitude: amplitude, httpClient: uploader, configuration: configuration)
     }
 
     private func makeEvent(_ insertId: String, type: String = "Content Stopped") -> BaseEvent {

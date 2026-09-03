@@ -24,9 +24,14 @@ extension DelayedEventTracker {
             case wouldExceedSizeLimit
         }
 
+        private let eventsSizeLimit: Int
         private var order: [String] = []
         private var byId: [String: Entry] = [:]
         private var totalEventBytes = 0
+
+        init(eventsSizeLimit: Int) {
+            self.eventsSizeLimit = eventsSizeLimit
+        }
 
         var isEmpty: Bool { order.isEmpty }
 
@@ -41,7 +46,7 @@ extension DelayedEventTracker {
             guard let entry = Entry(event: event) else {
                 return .failure(.unencodable)
             }
-            guard encodedSetSize(upserting: entry, for: insertId) <= DelayedEventsDefaults.eventsSizeLimit else {
+            guard encodedSetSize(upserting: entry, for: insertId) <= eventsSizeLimit else {
                 return .failure(.wouldExceedSizeLimit)
             }
             return .success(entry)

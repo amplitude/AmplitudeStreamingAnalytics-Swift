@@ -6,13 +6,18 @@ import Foundation
 /// enrichment as any other event. Do not mutate one after tracking it — track a fresh one carrying
 /// the same `insert_id` instead.
 final class DelayedEvents: BeforePlugin {
+    let configuration: DelayedEventsConfiguration
     private let tracker: DelayedEventTracker
 
-    init(amplitude: Amplitude, httpClient: DelayedEventsUploading? = nil) {
-        let configuration = amplitude.configuration
+    init(amplitude: Amplitude,
+         httpClient: DelayedEventsUploading? = nil,
+         configuration: DelayedEventsConfiguration = DelayedEventsConfiguration()) {
+        let amplitudeConfiguration = amplitude.configuration
+        self.configuration = configuration
         tracker = DelayedEventTracker(
+            amplitudeConfiguration: amplitudeConfiguration,
             configuration: configuration,
-            httpClient: httpClient ?? DelayedEventsHttpClient(configuration: configuration))
+            httpClient: httpClient ?? DelayedEventsHttpClient(configuration: amplitudeConfiguration))
         super.init()
         amplitude.add(plugin: self)
     }
