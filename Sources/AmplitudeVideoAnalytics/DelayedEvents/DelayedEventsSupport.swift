@@ -19,12 +19,6 @@ enum DelayedHosts {
     static let eu = "https://api.eu.amplitude.com/2/httpapi/delayed"
 }
 
-enum DelayedEventsDefaults {
-    static let pulseInterval: TimeInterval = 60
-    static let delayTimeoutMs: Int64 = 3_600_000
-    static let eventsSizeLimit = 40_000
-}
-
 #if (os(iOS) || os(tvOS) || os(visionOS) || targetEnvironment(macCatalyst)) && !AMPLITUDE_DISABLE_UIKIT
 /// Owns a single `UIApplication` background task and ends it exactly once —
 /// whether the upload completes first or iOS's expiration handler fires first.

@@ -5,15 +5,15 @@ import Foundation
 /// Every request is a full-replace upsert of one server row, so each send carries the complete
 /// live set. Do not mutate a tracked event; refresh it by tracking a fresh one with the same id.
 final class DelayedEventTracker {
-    private let configuration: Configuration
+    private let amplitudeConfiguration: Configuration
+    private let configuration: DelayedEventsConfiguration
     private let httpClient: DelayedEventsUploading
     private let logger: (any Logger)?
-    private let delayTimeoutMs: Int64
 
     // All mutable state is confined to this serial queue; HTTP completions hop back onto it.
     private let queue = DispatchQueue(label: "com.amplitude.delayedEventTracker")
     private var delayId = UUID().uuidString
-    private var entries = OrderedEntries()
+    private var entries: OrderedEntries
 
     // One request at a time: bodies fully replace the same row, so overlapping ones can land out of order.
     private var needsSend = false
@@ -21,15 +21,15 @@ final class DelayedEventTracker {
     private var requestInFlight = false
     private var timer: PulseTimer!
 
-    init(configuration: Configuration,
-         httpClient: DelayedEventsUploading,
-         pulseInterval: TimeInterval = DelayedEventsDefaults.pulseInterval,
-         delayTimeoutMs: Int64 = DelayedEventsDefaults.delayTimeoutMs) {
+    init(amplitudeConfiguration: Configuration,
+         configuration: DelayedEventsConfiguration,
+         httpClient: DelayedEventsUploading) {
+        self.amplitudeConfiguration = amplitudeConfiguration
         self.configuration = configuration
         self.httpClient = httpClient
-        self.logger = configuration.loggerProvider
-        self.delayTimeoutMs = delayTimeoutMs
-        timer = PulseTimer(interval: pulseInterval, queue: queue) { [weak self] in
+        self.logger = amplitudeConfiguration.loggerProvider
+        entries = OrderedEntries(eventsSizeLimit: configuration.eventsSizeLimit)
+        timer = PulseTimer(interval: configuration.pulseInterval, queue: queue) { [weak self] in
             self?.setNeedsSend()
         }
     }
@@ -53,6 +53,9 @@ final class DelayedEventTracker {
         // A rejected refresh leaves the live entry standing; no send, it rides the next pulse.
         guard let entry = admissibleEntry(event, insertId: insertId) else { return }
         entries.upsert(entry, for: insertId)
+        if event.forcePulse {
+            setNeedsSend()
+        }
     }
 
     func flush() {
@@ -77,7 +80,9 @@ final class DelayedEventTracker {
         if let entry = admissibleEntry(event, insertId: insertId) {
             entries.upsert(entry, for: insertId)
             timer.resume()
-            setNeedsSend()
+            if event.forcePulse {
+                setNeedsSend()
+            }
         } else {
             suspendPulseIfIdle()
         }
@@ -143,11 +148,11 @@ final class DelayedEventTracker {
             }
             if flushing || entry.kind == .instant { settledIds.append(insertId) }
         }
-        // `delayTimeoutMs` keeps the row alive; 0 has the server ingest and delete it.
-        let timeout: Int64 = (flushing || delayedEvents.isEmpty) ? 0 : delayTimeoutMs
-        let body = DelayedRequestBody(apiKey: configuration.apiKey,
+        // The TTL keeps the row alive; 0 has the server ingest and delete it.
+        let ttlMs: Int64 = (flushing || delayedEvents.isEmpty) ? 0 : configuration.ttlMs
+        let body = DelayedRequestBody(apiKey: amplitudeConfiguration.apiKey,
                                       id: delayId,
-                                      timeout: timeout,
+                                      ttlMs: ttlMs,
                                       events: delayedEvents,
                                       instantEvents: instantEvents.isEmpty ? nil : instantEvents)
         return (body, settledIds)
