@@ -107,16 +107,16 @@ final class StopDeadlockTests: XCTestCase {
 
 final class StopObservingClearsOnEventTests: XCTestCase {
 
-    /// stopObserving() nils out onEvent to prevent delivery from in-flight KVO callbacks.
+    /// stopObserving() alone prevents event delivery — the new API has no separate onEvent property.
     func testStopObservingAlonePreventsEventDelivery() {
         let adapter = AVPlayerAdapter(AVPlayer())
-        adapter.onEvent = { _, _ in }
-        adapter.startObserving()
+        var delivered = false
 
+        adapter.startObserving { _, _ in delivered = true }
         adapter.stopObserving()
 
-        XCTAssertNil(adapter.onEvent,
-                     "stopObserving() must nil out onEvent to prevent delivery from in-flight KVO callbacks")
+        XCTAssertFalse(delivered,
+                       "stopObserving() must clear the handler so no in-flight KVO callbacks can deliver")
     }
 
     /// After finish(), no events should leak — onEvent is nil from both finish() and stopObserving().
@@ -216,8 +216,7 @@ final class KVOAutoCleanupTests: XCTestCase {
         var player: AVPlayer? = AVPlayer()
         let adapter = AVPlayerAdapter(player!)
 
-        adapter.onEvent = { _, _ in }
-        adapter.startObserving()
+        adapter.startObserving { _, _ in }
 
         player = nil
 

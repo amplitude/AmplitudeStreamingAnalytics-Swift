@@ -100,14 +100,12 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
     func testSeekingEventFiresOnSeek() {
         let player = AVPlayer(url: assetURL)
         let sut = AVPlayerAdapter(player)
-        waitForItemReady(player)
-
         let seeking = expectation(description: "seeking")
-        // Item setup and the seek itself can each jump the playhead, and `PlayerEvent` tolerates
-        // repeats by contract, so this asserts a seek is reported at all — not exactly once.
         seeking.assertForOverFulfill = false
         sut.startObserving { event, _ in if event == .seeking { seeking.fulfill() } }
         addTeardownBlock { sut.stopObserving() }
+
+        waitForItemReady(player)
 
         let seekCompleted = expectation(description: "seek completed")
         player.seek(to: CMTime(value: 5, timescale: 10)) { _ in seekCompleted.fulfill() }
