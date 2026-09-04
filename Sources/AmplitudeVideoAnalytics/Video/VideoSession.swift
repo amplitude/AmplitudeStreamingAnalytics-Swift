@@ -54,11 +54,10 @@ public final class VideoSession {
 
     func start() {
         guard !isFinal else { return }
-        player.onEvent = { [weak self] event, sample in
+        player.startObserving { [weak self] event, sample in
             guard let self else { return }
             self.queue.async { self.handle(event, sample: sample) }
         }
-        player.startObserving()
     }
 
     /// `sample` is the reading taken when the event fired. It beats one taken here, because the
@@ -105,7 +104,6 @@ public final class VideoSession {
         if let sample { record(sample) }
         handleStop(reason: .untracked, sample: sample)
         isFinal = true
-        player.onEvent = nil
         player.stopObserving()
         onFinal?()
         onEmit = nil

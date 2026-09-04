@@ -41,7 +41,6 @@ final class FakePlayer: Player {
 
     var onEvent: ((PlayerEvent, PlayerSample?) -> Void)? {
         get { lock.withLock { handler } }
-        set { lock.withLock { handler = newValue } }
     }
 
     var startObservingCount: Int { lock.withLock { startObservingValue } }
@@ -58,8 +57,8 @@ final class FakePlayer: Player {
         }
     }
 
-    func startObserving() {
-        // Called outside the lock: the hook re-enters through `fire`.
+    func startObserving(onEvent: @escaping (PlayerEvent, PlayerSample?) -> Void) {
+        lock.withLock { handler = onEvent }
         let hook: (() -> Void)? = lock.withLock {
             startObservingValue += 1
             return onStartObservingValue
@@ -68,7 +67,10 @@ final class FakePlayer: Player {
     }
 
     func stopObserving() {
-        lock.withLock { stopObservingValue += 1 }
+        lock.withLock {
+            handler = nil
+            stopObservingValue += 1
+        }
     }
 
     /// Takes the reading at fire time, as `AVPlayerAdapter` does.
