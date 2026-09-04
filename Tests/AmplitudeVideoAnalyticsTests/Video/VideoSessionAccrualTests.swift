@@ -2,39 +2,20 @@ import XCTest
 
 @testable import AmplitudeVideoAnalytics
 
-/// How `stream_duration` is accrued, and what the `.seeking` anchor-drop does and does not cover.
+/// How `stream_duration` is accrued.
 ///
-/// The anchor-drop assumes `.seeking` reaches the session before anything else samples the
-/// playhead. Nothing enforces that: `.seeking` arrives via `queue.async` while `player.sample()`
-/// reads the playhead live, and under `AVPlayerAdapter` the two signals that race here originate
-/// on different threads — `.paused` from KVO on `timeControlStatus`, `.seeking` from an
-/// `AVPlayerItemTimeJumped` notification.
-///
-/// Tests marked CHARACTERIZATION record behaviour that is currently wrong. They are written to
-/// pass today so the suite stays green, and each one says what its assertion becomes once fixed.
+/// Watch time is playhead advance bounded by what playback could have covered in the wall time
+/// between two readings. That bound is what excludes a jump, and it holds no matter when — or
+/// whether — a `.seeking` event turns up, which matters because events fired on different threads
+/// reach the session's queue in no particular order.
 final class VideoSessionAccrualTests: XCTestCase {
 
-    // MARK: - the ordering the anchor-drop assumes
-
-    func testSeekingBeforeTheStopExcludesTheJump() {
-        let harness = VideoSessionHarness(label: "seek-ordered", duration: 600)
-        harness.onQueue {
-            harness.session.handle(.played)          // position 0
-            harness.player.position = 10
-            harness.session.refresh()                // 10s genuinely watched
-            harness.session.handle(.seeking)         // anchor dropped first
-            harness.player.position = 500
-            harness.session.handle(.paused)
-        }
-        XCTAssertEqual(harness.lastStreamDuration, 10, "the scrub is excluded")
-    }
-
-    func testTicksWithoutTimeJumpsAccrueEveryDelta() {
+    func testPlaybackAccruesEveryTick() {
         let harness = VideoSessionHarness(label: "ticks", duration: 600)
         harness.onQueue {
             harness.session.handle(.played)
-            for tick in 1...10 {
-                harness.player.position = TimeInterval(tick) * 5
+            for _ in 1...10 {
+                harness.play(forSeconds: 5)
                 harness.session.refresh()
             }
             harness.session.handle(.paused)
@@ -42,74 +23,140 @@ final class VideoSessionAccrualTests: XCTestCase {
         XCTAssertEqual(harness.lastStreamDuration, 50)
     }
 
-    // MARK: - CHARACTERIZATION: the ordering is not guaranteed
+    // MARK: - jumps are excluded because they outrun wall time
 
-    /// Scrub-then-pause is the everyday trigger: the user drags the scrubber (the playhead jumps)
-    /// and the app pauses. `.paused` and `.seeking` are delivered on two different threads and
-    /// each hops onto the session queue independently, so whichever enqueues first wins. When
-    /// `.paused` wins, `handleStop` samples the post-jump playhead and books the whole jump.
-    ///
-    /// FIX: stop relying on cross-event ordering. Clamping each delta to wall-clock elapsed
-    /// (× rate) is immune to delivery order and subsumes the existing negative clamp. This test
-    /// then asserts 10 — the same as `testSeekingBeforeTheStopExcludesTheJump`.
-    func testCharacterization_seekingAfterTheStopBooksTheJumpAsWatchTime() {
-        let harness = VideoSessionHarness(label: "seek-raced", duration: 600)
+    func testScrubIsExcludedWhenSeekingArrivesFirst() {
+        let harness = VideoSessionHarness(label: "seek-ordered", duration: 600)
         harness.onQueue {
-            harness.session.handle(.played)          // position 0
-            harness.player.position = 10
-            harness.session.refresh()                // 10s genuinely watched
-            harness.player.position = 500            // user scrubs to 8:20
-            harness.session.handle(.paused)          // .paused hop wins the race
-            harness.session.handle(.seeking)         // .seeking hop arrives too late
+            harness.session.handle(.played)
+            harness.play(forSeconds: 10)
+            harness.session.refresh()
+            harness.session.handle(.seeking)
+            harness.scrub(to: 500)
+            harness.session.handle(.paused)
         }
-        XCTAssertEqual(harness.lastStreamDuration, 500,
-                       "CHARACTERIZATION: 490s of scrub booked as watch time; the truth is 10")
+        XCTAssertEqual(harness.lastStreamDuration, 10, "only the 10s actually watched")
     }
 
-    /// The anchor-drop never banks the pending delta, it discards it. One time jump per tick
-    /// therefore accrues nothing at all — the shape a live stream would produce if it posts
-    /// `AVPlayerItemTimeJumped` at least once per pulse.
-    ///
-    /// FIX: the same wall-clock clamp. This test then asserts 50, matching
-    /// `testTicksWithoutTimeJumpsAccrueEveryDelta`.
-    func testCharacterization_aTimeJumpPerTickAccruesNothing() {
+    /// The case that used to book the whole scrub as watch time. `.paused` and `.seeking` are
+    /// delivered on two different threads under `AVPlayerAdapter` — KVO on `timeControlStatus`
+    /// and an `AVPlayerItemTimeJumped` notification — so `.paused` can reach the queue first.
+    /// The result must not depend on which one wins.
+    func testScrubIsExcludedEvenWhenSeekingArrivesAfterTheStop() {
+        let harness = VideoSessionHarness(label: "seek-raced", duration: 600)
+        harness.onQueue {
+            harness.session.handle(.played)
+            harness.play(forSeconds: 10)
+            harness.session.refresh()
+            harness.scrub(to: 500)                   // user scrubs to 8:20
+            harness.session.handle(.paused)          // .paused hop wins the race
+            harness.session.handle(.seeking)         // .seeking hop arrives too late to help
+        }
+        XCTAssertEqual(harness.lastStreamDuration, 10, "the 490s jump is not watch time")
+    }
+
+    /// And with no seek signal at all — the shape a live stream produces if it never posts one.
+    func testScrubIsExcludedWithNoSeekingEventAtAll() {
+        let harness = VideoSessionHarness(label: "seek-absent", duration: 600)
+        harness.onQueue {
+            harness.session.handle(.played)
+            harness.play(forSeconds: 10)
+            harness.session.refresh()
+            harness.scrub(to: 500)
+            harness.session.handle(.paused)
+        }
+        XCTAssertEqual(harness.lastStreamDuration, 10)
+    }
+
+    /// A time jump before every tick used to discard all accrual, because the anchor was dropped
+    /// and the pending delta went with it. Nothing is discarded now; only the jump is excluded.
+    func testATimeJumpPerTickStillAccruesTheWatchedTime() {
         let harness = VideoSessionHarness(label: "jump-storm", duration: 600)
         harness.onQueue {
             harness.session.handle(.played)
-            for tick in 1...10 {
-                harness.player.position = TimeInterval(tick) * 5
+            for _ in 1...10 {
+                harness.play(forSeconds: 5)
                 harness.session.handle(.seeking)
                 harness.session.refresh()
             }
             harness.session.handle(.paused)
         }
-        XCTAssertEqual(harness.lastStreamDuration, 0,
-                       "CHARACTERIZATION: 50s watched, 0s reported")
+        XCTAssertEqual(harness.lastStreamDuration, 50, "50s watched, 50s reported")
     }
 
-    // MARK: - CHARACTERIZATION: errors outside a play
+    func testBackwardsMovementIsNeverNegative() {
+        let harness = VideoSessionHarness(label: "backwards", duration: 600)
+        harness.onQueue {
+            harness.session.handle(.played)
+            harness.play(forSeconds: 5)
+            harness.session.refresh()
+            harness.scrub(to: 2)
+            harness.session.refresh()
+        }
+        XCTAssertEqual(harness.lastStreamDuration, 5)
+    }
 
-    /// `handle(.error)` guards on `isPlaying`, which is justified as browser parity for an error
-    /// before the first play. It also swallows an error *after* a pause: nothing is emitted and
-    /// the session stays open until `stop()` or the player vanishing.
-    ///
-    /// FIX: if the parity rule is really "before the first play", guard on `playId.isEmpty`
-    /// instead. This test then asserts a fourth event and `isFinal == true`.
-    func testCharacterization_errorWhilePausedIsSwallowedAndLeavesTheSessionOpen() {
+    /// Time passing while paused is not watch time, and does not enlarge the next allowance
+    /// beyond what the playhead actually covered.
+    func testTimePassingWhilePausedIsNotWatchTime() {
+        let harness = VideoSessionHarness(label: "paused-gap", duration: 600)
+        harness.onQueue {
+            harness.session.handle(.played)
+            harness.play(forSeconds: 10)
+            harness.session.handle(.paused)
+            harness.wait(seconds: 300)
+            harness.session.handle(.played)
+            harness.play(forSeconds: 5)
+            harness.session.handle(.paused)
+        }
+        XCTAssertEqual(harness.lastStreamDuration, 15, "10s + 5s, not the 300s spent paused")
+    }
+
+    /// Faster-than-realtime playback must not be clipped by the clamp.
+    func testDoubleRatePlaybackAccruesTheFullPlayheadAdvance() {
+        let harness = VideoSessionHarness(label: "2x", duration: 600)
+        harness.player.rate = 2
+        harness.onQueue {
+            harness.session.handle(.played)
+            harness.clock.advance(10)
+            harness.scrub(to: 20)        // 10s of wall time, 20s of playhead at 2x
+            harness.session.refresh()
+            harness.session.handle(.paused)
+        }
+        XCTAssertEqual(harness.lastStreamDuration, 20)
+    }
+
+    // MARK: - errors
+
+    /// An error after the first play ends the session whether or not a play is currently open.
+    func testErrorWhilePausedEndsTheSession() {
         let harness = VideoSessionHarness(label: "error-paused")
         harness.onQueue {
             harness.session.handle(.played)
-            harness.player.position = 20
+            harness.play(forSeconds: 20)
             harness.session.handle(.paused)
             harness.session.handle(.error(message: "network died while paused"))
         }
 
-        XCTAssertEqual(harness.emitted.count, 3, "CHARACTERIZATION: the error emits nothing")
-        XCTAssertFalse(harness.session.isFinal, "CHARACTERIZATION: the session survives a fatal error")
-        XCTAssertEqual(harness.finalizedCount, 0)
+        XCTAssertEqual(harness.emitted.count, 3, "the row was already finalized by the pause")
+        XCTAssertTrue(harness.session.isFinal, "but the session is over")
+        XCTAssertEqual(harness.finalizedCount, 1)
     }
 
-    /// Contrast, and the behaviour the guard is actually there for.
+    func testErrorWhilePlayingFinalizesWithTheMessage() {
+        let harness = VideoSessionHarness(label: "error-playing")
+        harness.onQueue {
+            harness.session.handle(.played)
+            harness.play(forSeconds: 20)
+            harness.session.handle(.error(message: "boom"))
+        }
+
+        XCTAssertEqual(harness.stopReason(at: 2), "error")
+        XCTAssertEqual(harness.emitted[2].eventProperties?["error_message"] as? String, "boom")
+        XCTAssertTrue(harness.session.isFinal)
+    }
+
+    /// Nothing has played, so there is no row to finalize and nothing to report.
     func testErrorBeforeTheFirstPlayIsIgnoredWithoutEndingTheSession() {
         let harness = VideoSessionHarness(label: "error-first")
         harness.onQueue { harness.session.handle(.error(message: "boom")) }

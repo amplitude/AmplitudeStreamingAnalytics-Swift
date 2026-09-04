@@ -6,10 +6,9 @@ import XCTest
 ///
 /// `Player` may be called on any thread and may fire `onEvent` on any thread; the session is the
 /// player's only consumer and touches it from one queue, so the player's own storage is what has
-/// to tolerate the crossing. These tests pin down what that buys and where it stops.
+/// to tolerate the crossing. These tests pin down what that buys.
 ///
-/// Tests marked CHARACTERIZATION record behaviour that is currently wrong. They are written to
-/// pass today so the suite stays green, and each one says what its assertion becomes once fixed.
+/// `stop()` hops with `queue.async`, so these drain the queue before asserting.
 final class VideoSessionConcurrencyTests: XCTestCase {
 
     // MARK: - what the confinement does buy
@@ -49,8 +48,7 @@ final class VideoSessionConcurrencyTests: XCTestCase {
         }
     }
 
-    /// `stop()` hops with `queue.sync`, so it is safe from a thread that is *not* the session's
-    /// queue — player callbacks included, since those reach the session with `queue.async`.
+    /// `stop()` is safe from any thread, player-callback threads included.
     func testStopFromAPlayerCallbackThreadDoesNotBlockForever() {
         let harness = VideoSessionHarness(label: "callback-thread")
         harness.onQueue { harness.session.start() }
@@ -69,18 +67,56 @@ final class VideoSessionConcurrencyTests: XCTestCase {
         XCTAssertTrue(harness.session.isFinal)
     }
 
-    /// The flip side: `queue.sync` means the caller waits for whatever else the queue is doing.
-    /// Apps call `stop()` from `viewWillDisappear`/`deinit` on the main thread.
-    func testStopBlocksTheCallerUntilTheQueueDrains() {
-        let harness = VideoSessionHarness(label: "blocking")
-        harness.queue.async { Thread.sleep(forTimeInterval: 0.2) }
+    /// `stop()` used to be `queue.sync`, which stalled the caller behind unrelated queue work.
+    /// Apps call it from `viewWillDisappear`/`deinit` on the main thread, so it must not block.
+    func testStopDoesNotBlockTheCallerBehindQueueWork() {
+        let harness = VideoSessionHarness(label: "non-blocking")
+        harness.queue.async { Thread.sleep(forTimeInterval: 0.3) }
 
         let start = Date()
         harness.session.stop()
         let blocked = Date().timeIntervalSince(start)
 
-        XCTAssertGreaterThan(blocked, 0.15,
-                             "stop() is synchronous: its latency is whatever the shared queue owes")
+        XCTAssertLessThan(blocked, 0.1, "stop() returns immediately, it does not wait on the queue")
+        harness.drain()
+        XCTAssertTrue(harness.session.isFinal, "and the session is finalized once the queue gets there")
+    }
+
+    /// `stop()` from the session's own queue is exactly what `queue.sync` used to trap on.
+    /// `onEmit` and `onFinal` both run there, so this has to be ordinary.
+    func testStopFromTheSessionQueueIsSafe() {
+        let harness = VideoSessionHarness(label: "reentrant")
+        harness.session.onEmit = { [weak session = harness.session] _ in session?.stop() }
+
+        harness.onQueue { harness.session.handle(.played) }
+        harness.drain()
+
+        XCTAssertTrue(harness.session.isFinal)
+        XCTAssertEqual(harness.finalizedCount, 1)
+    }
+
+    /// The same from `onFinal`, which runs inside `finish()` itself.
+    func testStopFromInsideOnFinalIsSafe() {
+        let harness = VideoSessionHarness(label: "reentrant-final")
+        let finals = Counter()
+        harness.session.onFinal = { [weak session = harness.session] in
+            finals.increment()
+            session?.stop()
+        }
+
+        harness.session.stop()
+        harness.drain()
+        harness.drain()   // the re-entrant stop enqueues one more hop
+
+        XCTAssertTrue(harness.session.isFinal)
+        XCTAssertEqual(finals.value, 1, "the re-entrant stop is a no-op, not a second finalize")
+    }
+
+    private final class Counter {
+        private let lock = NSLock()
+        private var count = 0
+        func increment() { lock.withLock { count += 1 } }
+        var value: Int { lock.withLock { count } }
     }
 
     /// In-flight player events cannot jump ahead of a `stop()` that was requested after them,
@@ -91,6 +127,7 @@ final class VideoSessionConcurrencyTests: XCTestCase {
         harness.onQueue { harness.session.handle(.played) }
 
         harness.session.stop()
+        harness.drain()
         let afterStop = harness.emitted.count
 
         harness.player.fire(.played)
@@ -101,19 +138,16 @@ final class VideoSessionConcurrencyTests: XCTestCase {
         XCTAssertEqual(harness.finalizedCount, 1)
     }
 
-    // MARK: - CHARACTERIZATION: start() does not check isFinal
+    // MARK: - start() after stop()
 
-    /// `start()` is the only queue-confined entry point without a `!isFinal` guard, so a `start()`
-    /// that lands after a `stop()` re-attaches the player to a dead session. `handle` then drops
-    /// everything as final and nothing ever calls `stopObserving()` again: the player is observed
-    /// forever, producing nothing.
-    ///
-    /// FIX: `guard !isFinal else { return }` at the top of `start()`. This test then becomes
-    /// `XCTAssertNil(player.onEvent)` and `XCTAssertEqual(player.startObservingCount, 0)`.
-    func testCharacterization_startOnAFinalSessionReArmsThePlayer() {
+    /// `stop()` is public and can land at any moment, so a `start()` that follows it must not
+    /// re-attach the player to a dead session — that would observe forever, produce nothing, and
+    /// never be torn down again.
+    func testStartOnAFinalSessionDoesNothing() {
         let harness = VideoSessionHarness(label: "restart")
         harness.onQueue { harness.session.handle(.played) }
         harness.session.stop()
+        harness.drain()
 
         XCTAssertTrue(harness.session.isFinal)
         XCTAssertNil(harness.player.onEvent, "stop() detached the player")
@@ -121,15 +155,8 @@ final class VideoSessionConcurrencyTests: XCTestCase {
 
         harness.onQueue { harness.session.start() }
 
-        XCTAssertTrue(harness.session.isFinal, "still final")
-        XCTAssertNotNil(harness.player.onEvent, "CHARACTERIZATION: handler re-installed on a dead session")
-        XCTAssertEqual(harness.player.startObservingCount, 1, "CHARACTERIZATION: observation restarted")
-        XCTAssertEqual(harness.player.stopObservingCount, 1, "CHARACTERIZATION: never torn down again")
-
-        let before = harness.emitted.count
-        harness.player.fire(.played)
-        harness.drain()
-        XCTAssertEqual(harness.emitted.count, before, "observed for nothing")
+        XCTAssertNil(harness.player.onEvent, "the player stays detached")
+        XCTAssertEqual(harness.player.startObservingCount, 0, "observation is not restarted")
     }
 
     // MARK: - CHARACTERIZATION: dropping the handle
@@ -159,37 +186,4 @@ final class VideoSessionConcurrencyTests: XCTestCase {
         XCTAssertEqual(finalizedBeforeDrop, 0, "CHARACTERIZATION: onFinal never fires")
     }
 
-    // MARK: - re-entrancy (opt-in: these crash the process)
-
-    /// `stop()` is `queue.sync`, and `onEmit`/`onFinal` both run *on that queue*. Calling `stop()`
-    /// from either does not deadlock — libdispatch traps the process:
-    ///
-    ///     EXC_BREAKPOINT (SIGTRAP)
-    ///     BUG IN CLIENT OF LIBDISPATCH: dispatch_sync called on queue already owned by current thread
-    ///
-    /// Verified 2026-09-04 against 76c6219 by running each of these alone and reading the crash
-    /// report. They cannot run in the normal suite because they take the test process with them.
-    ///
-    ///     PROBE_CRASH=1 swift test --filter testReentrantStopFromOnEmitTrapsTheProcess
-    ///
-    /// FIX: make `stop()` async, or detect re-entrancy, rather than documenting it. Note the
-    /// current doc comment on `stop()` names `Player` callbacks as the hazard — those are the one
-    /// caller that is safe (see `testStopFromAPlayerCallbackThreadDoesNotBlockForever`).
-    func testReentrantStopFromOnEmitTrapsTheProcess() throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["PROBE_CRASH"] != nil,
-                          "crashes the test process; run deliberately with PROBE_CRASH=1")
-        let harness = VideoSessionHarness(label: "reentrant-emit")
-        harness.session.onEmit = { [weak session = harness.session] _, _ in session?.stop() }
-        harness.onQueue { harness.session.handle(.played) }
-        XCTFail("unreachable: the dispatch_sync above traps")
-    }
-
-    func testReentrantStopFromOnFinalTrapsTheProcess() throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["PROBE_CRASH"] != nil,
-                          "crashes the test process; run deliberately with PROBE_CRASH=1")
-        let harness = VideoSessionHarness(label: "reentrant-final")
-        harness.session.onFinal = { [weak session = harness.session] in session?.stop() }
-        harness.session.stop()
-        XCTFail("unreachable: the dispatch_sync above traps")
-    }
 }

@@ -9,18 +9,33 @@ final class VideoSessionTests: XCTestCase {
     private var emitted: [DelayedEvent] = []
     private var finalized = 0
     private var clock = Date(timeIntervalSince1970: 1_752_000_000)
+    private var queue: DispatchQueue!
 
     override func setUp() {
         super.setUp()
         player = FakePlayer()
         player.duration = 100
+        queue = DispatchQueue(label: "test")
         session = VideoSession(player: player,
                                playerIdentity: ObjectIdentifier(player),
                                options: VideoTrackingOptions(contentId: "ep-1"),
-                               queue: DispatchQueue(label: "test"),
+                               queue: queue,
                                now: { [unowned self] in self.clock })
-        session.onEmit = { [unowned self] event, _ in self.emitted.append(event) }
+        session.onEmit = { [unowned self] event in self.emitted.append(event) }
         session.onFinal = { [unowned self] in self.finalized += 1 }
+    }
+
+    /// Plays for `seconds` at 1x. Watch time is bounded by elapsed wall time, so the playhead and
+    /// the clock have to advance together or the test is describing something impossible.
+    private func play(_ seconds: TimeInterval) {
+        clock += seconds
+        player.position += seconds
+    }
+
+    /// `stop()` hops onto the queue, so tests wait for it.
+    private func stopAndWait() {
+        session.stop()
+        queue.sync {}
     }
 
     // MARK: - play / pause / ended
@@ -50,7 +65,7 @@ final class VideoSessionTests: XCTestCase {
     func testPausedEmitsFinalSnapshotAsInstantWithSameInsertId() {
         session.handle(.played)
         let liveId = delayed(0).insertId
-        player.position = 30
+        play(30)
         session.handle(.paused)
 
         XCTAssertEqual(emitted.count, 3)
@@ -69,14 +84,14 @@ final class VideoSessionTests: XCTestCase {
 
     func testEndedThenPlayedIsAReplayWithNewPlayIdAndCumulativeWatchDuration() {
         session.handle(.played)
-        player.position = 100
+        play(100)
         session.handle(.ended)
         XCTAssertEqual(instant(2).eventProperties?["stop_reason"] as? String, "ended")
         let firstPlayId = instant(2).eventProperties?["play_id"] as? String
 
-        player.position = 0
+        player.position = 0            // a replay rewinds without time passing
         session.handle(.played)
-        player.position = 20
+        play(20)
         session.handle(.paused)
 
         XCTAssertEqual(emitted.count, 6)
@@ -108,9 +123,9 @@ final class VideoSessionTests: XCTestCase {
 
     func testTicksAccruePlayheadDeltasAndPushTheSnapshot() {
         session.handle(.played)
-        player.position = 5
+        play(5)
         session.refresh()
-        player.position = 12
+        play(7)
         session.refresh()
 
         XCTAssertEqual(emitted.count, 4)
@@ -119,14 +134,16 @@ final class VideoSessionTests: XCTestCase {
         XCTAssertEqual(delayed(3).insertId, delayed(0).insertId, "same live snapshot, replaced in place")
     }
 
-    func testSeekingSkipsExactlyOneDelta() {
+    /// The jump covers ground playback could not have, so it is excluded; the seconds either
+    /// side of it are not. This holds whether or not the `.seeking` event turns up at all.
+    func testSeekingExcludesTheJumpAndNothingElse() {
         session.handle(.played)
-        player.position = 5
+        play(5)
         session.refresh()
         session.handle(.seeking)
         player.position = 60
         session.refresh()
-        player.position = 62
+        play(2)
         session.refresh()
 
         XCTAssertEqual(delayed(4).eventProperties?["stream_duration"] as? TimeInterval, 7)
@@ -134,9 +151,9 @@ final class VideoSessionTests: XCTestCase {
 
     func testBackwardsMovementWithoutSeekingClampsToZero() {
         session.handle(.played)
-        player.position = 5
+        play(5)
         session.refresh()
-        player.position = 2
+        player.position = 2            // a jump backwards, no time passing
         session.refresh()
 
         XCTAssertEqual(delayed(3).eventProperties?["stream_duration"] as? TimeInterval, 5)
@@ -177,8 +194,8 @@ final class VideoSessionTests: XCTestCase {
 
     func testStopWhilePlayingSendsUntrackedAndIsIdempotent() {
         session.handle(.played)
-        session.stop()
-        session.stop()
+        stopAndWait()
+        stopAndWait()
 
         XCTAssertEqual(emitted.count, 3)
         XCTAssertEqual(instant(2).eventProperties?["stop_reason"] as? String, "untracked")
@@ -187,7 +204,7 @@ final class VideoSessionTests: XCTestCase {
     }
 
     func testStopWithNoOpenPlaySendsNothing() {
-        session.stop()
+        stopAndWait()
         XCTAssertTrue(emitted.isEmpty)
         XCTAssertTrue(session.isFinal)
         XCTAssertEqual(player.stopObservingCount, 1)
@@ -195,7 +212,7 @@ final class VideoSessionTests: XCTestCase {
 
     func testEventsAfterFinalAreIgnored() {
         session.handle(.played)
-        session.stop()
+        stopAndWait()
         session.handle(.played)
         session.refresh()
         XCTAssertEqual(emitted.count, 3)
@@ -206,7 +223,7 @@ final class VideoSessionTests: XCTestCase {
         let wired = VideoSession(player: player, playerIdentity: ObjectIdentifier(player),
                                  options: VideoTrackingOptions(), queue: queue, now: Date.init)
         var seen = 0
-        wired.onEmit = { _, _ in seen += 1 }
+        wired.onEmit = { _ in seen += 1 }
         player.onStartObserving = { [unowned self] in self.player.fire(.played) }
 
         wired.start()

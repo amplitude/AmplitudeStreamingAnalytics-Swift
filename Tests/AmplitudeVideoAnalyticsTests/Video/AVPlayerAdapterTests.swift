@@ -5,16 +5,16 @@ import XCTest
 
 // Scope: bare AVPlayer only (no item, no media); playback-driven events are covered by the integration tests.
 final class AVPlayerAdapterTests: XCTestCase {
-    func testSampleOfBarePlayerIsZeroPositionAndNilDuration() {
+    func testSampleOfBarePlayerIsZeroPositionNilDurationAndStoppedRate() {
         let player = AVPlayer()
         let sut = AVPlayerAdapter(player)
-        XCTAssertEqual(sut.sample(), PlayerSample(position: 0, duration: nil))
+        XCTAssertEqual(sut.sample(), PlayerSample(position: 0, duration: nil, rate: 0))
     }
 
     func testSampleIsNilAfterThePlayerIsReleased() {
         var player: AVPlayer? = AVPlayer()
         let sut = AVPlayerAdapter(player!)
-        sut.startObserving { _ in }
+        sut.startObserving { _, _ in }
         player = nil
         XCTAssertNil(sut.sample(), "a session must notice its player is gone while still observing")
         sut.stopObserving()
@@ -24,7 +24,7 @@ final class AVPlayerAdapterTests: XCTestCase {
         let player = AVPlayer()
         let sut = AVPlayerAdapter(player)
         withExtendedLifetime(player) {
-            sut.startObserving { _ in }
+            sut.startObserving { _, _ in }
             sut.stopObserving()
         }
     }
@@ -38,8 +38,8 @@ final class AVPlayerAdapterTests: XCTestCase {
         let player = AVPlayer()
         let sut = AVPlayerAdapter(player)
         withExtendedLifetime(player) {
-            sut.startObserving { _ in }
-            sut.startObserving { _ in }
+            sut.startObserving { _, _ in }
+            sut.startObserving { _, _ in }
             sut.stopObserving()
         }
     }
@@ -48,7 +48,7 @@ final class AVPlayerAdapterTests: XCTestCase {
         let player = AVPlayer()
         var sut: AVPlayerAdapter? = AVPlayerAdapter(player)
         withExtendedLifetime(player) {
-            sut?.startObserving { _ in }
+            sut?.startObserving { _, _ in }
             sut = nil
         }
     }
@@ -63,7 +63,7 @@ final class AVPlayerAdapterTests: XCTestCase {
         let player = AVPlayer()
         let sut = AVPlayerAdapter(player)
         var received: [PlayerEvent] = []
-        sut.startObserving { received.append($0) }
+        sut.startObserving { event, _ in received.append(event) }
 
         // A bare player with no item goes to `.waitingToPlayAtSpecifiedRate` on `play()`.
         player.play()
@@ -83,7 +83,7 @@ final class AVPlayerAdapterTests: XCTestCase {
         let sut = AVPlayerAdapter(player)
         var receivedEvents: [PlayerEvent] = []
         withExtendedLifetime(player) {
-            sut.startObserving { receivedEvents.append($0) }
+            sut.startObserving { event, _ in receivedEvents.append(event) }
 
             let unrelatedObject = NSObject()
             NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: unrelatedObject)

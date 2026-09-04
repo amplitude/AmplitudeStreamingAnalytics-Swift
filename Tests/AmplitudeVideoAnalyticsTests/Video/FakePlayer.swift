@@ -12,7 +12,8 @@ final class FakePlayer: Player {
     private var positionValue: TimeInterval = 0
     private var durationValue: TimeInterval?
     private var isGoneValue = false
-    private var handler: ((PlayerEvent) -> Void)?
+    private var rateValue: Double = 1
+    private var handler: ((PlayerEvent, PlayerSample?) -> Void)?
     private var startObservingValue = 0
     private var stopObservingValue = 0
     private var onStartObservingValue: (() -> Void)?
@@ -32,7 +33,13 @@ final class FakePlayer: Player {
         set { lock.withLock { isGoneValue = newValue } }
     }
 
-    var onEvent: ((PlayerEvent) -> Void)? {
+    /// Playback speed reported with every reading. 1 unless a test is exercising the clamp.
+    var rate: Double {
+        get { lock.withLock { rateValue } }
+        set { lock.withLock { rateValue = newValue } }
+    }
+
+    var onEvent: ((PlayerEvent, PlayerSample?) -> Void)? {
         get { lock.withLock { handler } }
         set { lock.withLock { handler = newValue } }
     }
@@ -46,7 +53,9 @@ final class FakePlayer: Player {
     }
 
     func sample() -> PlayerSample? {
-        lock.withLock { isGoneValue ? nil : PlayerSample(position: positionValue, duration: durationValue) }
+        lock.withLock {
+            isGoneValue ? nil : PlayerSample(position: positionValue, duration: durationValue, rate: rateValue)
+        }
     }
 
     func startObserving() {
@@ -62,5 +71,6 @@ final class FakePlayer: Player {
         lock.withLock { stopObservingValue += 1 }
     }
 
-    func fire(_ event: PlayerEvent) { onEvent?(event) }
+    /// Takes the reading at fire time, as `AVPlayerAdapter` does.
+    func fire(_ event: PlayerEvent) { onEvent?(event, sample()) }
 }

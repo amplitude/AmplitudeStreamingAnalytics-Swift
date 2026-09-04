@@ -11,8 +11,8 @@ final class AVPlayerAdapter: Player {
     private var didPlayToEndObserver: NSObjectProtocol?
     private var timeJumpedObserver: NSObjectProtocol?
 
-    // Written once per `startObserving`, before any observer exists; read on AVFoundation's threads.
-    private var onEvent: ((PlayerEvent) -> Void)?
+    private let eventLock = NSLock()
+    private var _onEvent: ((PlayerEvent, PlayerSample?) -> Void)?
 
     init(_ player: AVPlayer) {
         self.player = player
@@ -22,14 +22,19 @@ final class AVPlayerAdapter: Player {
         stopObserving()
     }
 
+    // Called outside the lock: a handler that reaches back in would deadlock. The reading is taken
+    // here, at fire time, because the playhead can move again before the consumer gets the event.
     private func emit(_ event: PlayerEvent) {
-        onEvent?(event)
+        let handler = eventLock.withLock { _onEvent }
+        handler?(event, sample())
     }
 
     func sample() -> PlayerSample? {
         guard let player else { return nil }
         let seconds = player.currentTime().seconds
-        return PlayerSample(position: seconds.isFinite ? seconds : 0, duration: duration(of: player.currentItem))
+        return PlayerSample(position: seconds.isFinite ? seconds : 0,
+                            duration: duration(of: player.currentItem),
+                            rate: Double(player.rate))
     }
 
     private func duration(of item: AVPlayerItem?) -> TimeInterval? {
@@ -38,10 +43,10 @@ final class AVPlayerAdapter: Player {
         return seconds.isFinite ? seconds : nil
     }
 
-    func startObserving(onEvent: @escaping (PlayerEvent) -> Void) {
+    func startObserving(onEvent: @escaping (PlayerEvent, PlayerSample?) -> Void) {
         guard !isObserving, let player else { return }
         isObserving = true
-        self.onEvent = onEvent
+        eventLock.withLock { _onEvent = onEvent }
 
         timeControlStatusObserver = TimeControlStatusObserver(player: player) { [weak self] status in
             self?.handle(status)
@@ -64,12 +69,13 @@ final class AVPlayerAdapter: Player {
 
         // `.new`-only KVO never reports a player that was already playing.
         if player.timeControlStatus == .playing {
-            onEvent(.played)
+            emit(.played)
         }
     }
 
     func stopObserving() {
         isObserving = false
+        eventLock.withLock { _onEvent = nil }
         timeControlStatusObserver?.invalidate()
         timeControlStatusObserver = nil
         itemStatusToken = nil
@@ -116,7 +122,7 @@ private final class TimeControlStatusObserver: NSObject {
         invalidate()
     }
 
-    // No-op once the player is gone: it took its registrations with it.
+    // Safe when the player is already gone: iOS 11+ automatically deregisters KVO observations when the observed object deallocates.
     func invalidate() {
         guard let player else { return }
         player.removeObserver(self, forKeyPath: Self.keyPath)
