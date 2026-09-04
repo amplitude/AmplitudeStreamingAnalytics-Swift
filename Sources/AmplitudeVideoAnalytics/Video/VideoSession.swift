@@ -1,6 +1,8 @@
 import AmplitudeSwift
 import Foundation
 
+private let queueKey = DispatchSpecificKey<Void>()
+
 /// One viewing of one piece of content. Ends on `stop()`, playback error, a new `trackVideo` for the same player,
 /// or when the player goes away. You do not need to keep this handle.
 public final class VideoSession {
@@ -11,6 +13,7 @@ public final class VideoSession {
     /// itself, so the request cannot be separated from the event that asked for it.
     var onEmit: ((DelayedEvent) -> Void)?
     var onFinal: (() -> Void)?
+    var onPlay: (() -> Void)?
     let playerIdentity: ObjectIdentifier
     private(set) var isFinal = false
 
@@ -42,6 +45,7 @@ public final class VideoSession {
         self.options = options
         self.queue = queue
         self.now = now
+        queue.setSpecific(key: queueKey, value: ())
     }
 
     /// Ends the session. Idempotent, and safe from any thread — including the session's own queue,
@@ -108,14 +112,16 @@ public final class VideoSession {
         onFinal?()
         onEmit = nil
         onFinal = nil
+        onPlay = nil
     }
 
     // MARK: - state machine
 
-    private var isPlaying: Bool { snapshotInsertId != nil }
+    var isPlaying: Bool { snapshotInsertId != nil }
 
     private func handlePlay(_ sample: PlayerSample) {
         guard !isPlaying else { return }
+        onPlay?()
         playId = UUID().uuidString
         snapshotInsertId = UUID().uuidString
         startTime = sample.position

@@ -43,14 +43,11 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
         if let backgroundObserver {
             NotificationCenter.default.removeObserver(backgroundObserver)
         }
-        // No other reference to the plugin exists at this point, so reading these off-queue
-        // cannot race a concurrent mutation; `queue.sync` here could deadlock if the last
-        // release happens on the queue itself (e.g. from inside `refreshSessions()` or an `onFinal`).
         let sessions = self.sessions
         let transport = self.transport
         queue.async {
             for session in sessions {
-                session.onEmit = { event, forcePulse in transport?.track(event, forcePulse: forcePulse) }
+                session.onEmit = { event in transport?.track(event, forcePulse: event.forcePulse) }
                 session.finish()
             }
         }
@@ -88,7 +85,8 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
                 session.finish()
                 return
             }
-            session.onEmit = { [weak self] event, forcePulse in self?.transport?.track(event, forcePulse: forcePulse) }
+            session.onEmit = { [weak self] event in self?.transport?.track(event, forcePulse: event.forcePulse) }
+            session.onPlay = { [weak self] in self?.timer.resume() }
             session.onFinal = { [weak self, weak session] in
                 self?.sessions.removeAll { $0 === session }
                 if self?.sessions.isEmpty == true { self?.timer.suspend() }
@@ -103,6 +101,9 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
     private func refreshSessions(forcePulse: Bool = false) {
         for session in sessions {
             session.refresh(forcePulse: forcePulse)
+        }
+        if !sessions.isEmpty && !sessions.contains(where: \.isPlaying) {
+            timer.suspend()
         }
     }
 
