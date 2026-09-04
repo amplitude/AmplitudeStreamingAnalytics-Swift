@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		32535F02EA3E2DE88882F750 /* UIKitPlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30DA46E82D86B64795D658BF /* UIKitPlayerScreen.swift */; };
+		DE304A0000000000000000A2 /* DemoAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE304A0000000000000000A1 /* DemoAnalytics.swift */; };
+		DE304A0000000000000000B2 /* StreamActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE304A0000000000000000B1 /* StreamActivityView.swift */; };
 		71107AF51305F4272B5C6B6E /* PlayerPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7DE37778FF2D4FA6E02CBA1 /* PlayerPresentation.swift */; };
 		84FC5A6DFEA6D8210F0EAC9B /* SwiftUIPlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3838B924358E6DA4641116 /* SwiftUIPlayerScreen.swift */; };
 		96252FEDEF732970A177AD63 /* AmplitudeVideoAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = E9DFDC30826F02FD94689616 /* AmplitudeVideoAnalytics */; };
@@ -16,6 +18,8 @@
 
 /* Begin PBXFileReference section */
 		30DA46E82D86B64795D658BF /* UIKitPlayerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKitPlayerScreen.swift; sourceTree = "<group>"; };
+		DE304A0000000000000000A1 /* DemoAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoAnalytics.swift; sourceTree = "<group>"; };
+		DE304A0000000000000000B1 /* StreamActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamActivityView.swift; sourceTree = "<group>"; };
 		62713690E12F87C92FE3A6BA /* VideoDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoDemoApp.swift; sourceTree = "<group>"; };
 		863FD8BC411ACD0BDEB76521 /* AmplitudeVideo-Swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "AmplitudeVideo-Swift"; path = ../..; sourceTree = SOURCE_ROOT; };
 		A2D915CB446A0FEEFFEF140F /* VideoDemo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VideoDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -38,7 +42,9 @@
 		5C9FE01B621BD27DBC83AC9E /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				DE304A0000000000000000A1 /* DemoAnalytics.swift */,
 				E7DE37778FF2D4FA6E02CBA1 /* PlayerPresentation.swift */,
+				DE304A0000000000000000B1 /* StreamActivityView.swift */,
 				AA3838B924358E6DA4641116 /* SwiftUIPlayerScreen.swift */,
 				30DA46E82D86B64795D658BF /* UIKitPlayerScreen.swift */,
 				62713690E12F87C92FE3A6BA /* VideoDemoApp.swift */,
@@ -130,6 +136,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				71107AF51305F4272B5C6B6E /* PlayerPresentation.swift in Sources */,
+				DE304A0000000000000000A2 /* DemoAnalytics.swift in Sources */,
+				DE304A0000000000000000B2 /* StreamActivityView.swift in Sources */,
 				84FC5A6DFEA6D8210F0EAC9B /* SwiftUIPlayerScreen.swift in Sources */,
 				32535F02EA3E2DE88882F750 /* UIKitPlayerScreen.swift in Sources */,
 				B7D73D1421A9E0DD40D5258A /* VideoDemoApp.swift in Sources */,

@@ -1,0 +1,71 @@
+import AmplitudeSwift
+import AmplitudeVideoAnalytics
+import Foundation
+
+private let demoAPIKey = "DEMO-API-KEY"
+
+final class DemoAnalytics: ObservableObject {
+    let plugin = StreamingAnalyticsPlugin()
+    let activity = StreamActivityLog()
+
+    private let amplitude: Amplitude
+
+    init() {
+        amplitude = Amplitude(configuration: Configuration(apiKey: demoAPIKey, logLevel: .debug))
+        // Registered before the streaming plugin so it observes emitted stream events on the
+        // `.before` timeline ahead of the delayed transport consuming them.
+        amplitude.add(plugin: StreamActivityRecorder(log: activity))
+        amplitude.add(plugin: plugin)
+    }
+}
+
+struct StreamActivityEntry: Identifiable {
+    let id = UUID()
+    let at = Date()
+    let eventType: String
+    let detail: String
+}
+
+final class StreamActivityLog: ObservableObject {
+    @Published private(set) var entries: [StreamActivityEntry] = []
+    @Published var isCapturing = true
+
+    func record(_ entry: StreamActivityEntry) {
+        DispatchQueue.main.async {
+            guard self.isCapturing else { return }
+            self.entries.insert(entry, at: 0)
+        }
+    }
+
+    func clear() {
+        entries.removeAll()
+    }
+}
+
+// Demo-only hook: copies each `[Amplitude] Stream *` event into the activity log and passes it
+// through untouched. Request-level inspection is deferred to the Kong cross-SDK harness.
+private final class StreamActivityRecorder: BeforePlugin {
+    private let log: StreamActivityLog
+
+    init(log: StreamActivityLog) {
+        self.log = log
+        super.init()
+    }
+
+    override func execute(event: BaseEvent) -> BaseEvent? {
+        guard event.eventType.hasPrefix("[Amplitude] Stream") else { return event }
+        log.record(StreamActivityEntry(eventType: event.eventType, detail: summarize(event)))
+        return event
+    }
+
+    private func summarize(_ event: BaseEvent) -> String {
+        let props = event.eventProperties ?? [:]
+        var parts: [String] = []
+        if let title = props["title"] as? String { parts.append(title) }
+        if let deliveryMode = props["delivery_mode"] as? String { parts.append(deliveryMode) }
+        if let duration = props["stream_duration"] as? Double { parts.append(String(format: "%.0fs", duration)) }
+        if let percent = props["percent_completed"] as? Double { parts.append(String(format: "%.0f%%", percent)) }
+        if let reason = props["stop_reason"] as? String { parts.append(reason) }
+        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+    }
+}
