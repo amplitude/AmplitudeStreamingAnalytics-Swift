@@ -3,53 +3,102 @@ import AmplitudeSwift
 
 @testable import AmplitudeVideoAnalytics
 
-final class FakeVideoPlayer: VideoPlayer {
-    var currentTime: TimeInterval = 0
-    var duration: TimeInterval?
-    var onEvent: ((VideoPlayerEvent) -> Void)?
-    func startObserving() {}
-    func stopObserving() {}
-    func fire(_ event: VideoPlayerEvent) { onEvent?(event) }
-}
+final class StreamingEventsTests: XCTestCase {
+    private let at = Date(timeIntervalSince1970: 1_752_000_000)
 
-final class VideoEventsTests: XCTestCase {
-    func testStoppedSnapshotVoD() {
-        let player = FakeVideoPlayer()
-        player.duration = 100
-        player.currentTime = 25
-        let event = VideoEvents.stoppedSnapshot(
-            options: VideoTrackingOptions(contentId: "ep-1", title: "Ep 1", contentType: .vod),
-            player: player, viewSessionId: "vs-1", watchDuration: 20,
-            stopReason: "paused", errorMessage: nil)
-        XCTAssertEqual(event.eventType, "Video Content Stopped")
+    func testStartedCarriesIdentityAndPosition() {
+        let event = StreamingEvents.started(options: VideoTrackingOptions(contentId: "ep-1", title: "Ep 1", deliveryMode: .onDemand),
+                                            state: state(position: 10, duration: 100, insertId: "start-1"))
+
+        XCTAssertEqual(event.eventType, "[Amplitude] Stream Started")
+        XCTAssertEqual(event.insertId, "start-1")
+        XCTAssertEqual(event.timestamp, 1_752_000_000_000)
+        XCTAssertEqual(event.kind, .instant, "a start finalizes nothing but is never held back")
         let props = event.eventProperties!
         XCTAssertEqual(props["content_id"] as? String, "ep-1")
-        XCTAssertEqual(props["current_time"] as? TimeInterval, 25)
-        XCTAssertEqual(props["percent_completed"] as? Double, 0.25)
-        XCTAssertEqual(props["stop_reason"] as? String, "paused")
-        XCTAssertNotNil(event.timestamp)
+        XCTAssertEqual(props["title"] as? String, "Ep 1")
+        XCTAssertEqual(props["delivery_mode"] as? String, "on_demand")
+        XCTAssertEqual(props["media_type"] as? String, "video")
+        XCTAssertEqual(props["stream_session_id"] as? String, "vs-1")
+        XCTAssertEqual(props["play_id"] as? String, "play-1")
+        XCTAssertEqual(props["duration"] as? TimeInterval, 100)
+        XCTAssertEqual(props["start_time"] as? TimeInterval, 10)
+        XCTAssertEqual(props["position"] as? TimeInterval, 10)
+        XCTAssertNil(props["stream_duration"])
+        XCTAssertNil(props["stop_reason"])
     }
 
-    func testLiveOmitsDurationAndPercent() {
-        let player = FakeVideoPlayer()   // duration nil
-        let event = VideoEvents.stoppedSnapshot(
-            options: VideoTrackingOptions(contentId: "live-1"),
-            player: player, viewSessionId: "vs-1", watchDuration: 5,
-            stopReason: nil, errorMessage: nil)
+    func testStoppedCarriesProgressAndReason() {
+        let event = StreamingEvents.stopped(options: VideoTrackingOptions(contentId: "ep-1", deliveryMode: .onDemand),
+                                            state: state(position: 25, duration: 100, streamDuration: 20, reason: .paused))
+
+        XCTAssertEqual(event.eventType, "[Amplitude] Stream Stopped")
+        let props = event.eventProperties!
+        XCTAssertEqual(props["position"] as? TimeInterval, 25)
+        XCTAssertEqual(props["start_time"] as? TimeInterval, 10)
+        XCTAssertEqual(props["stream_duration"] as? TimeInterval, 20)
+        XCTAssertEqual(props["percent_completed"] as? Double, 25)
+        XCTAssertEqual(props["stop_reason"] as? String, "paused")
+        XCTAssertNil(props["error_message"])
+    }
+
+    func testStoppedWithErrorCarriesMessage() {
+        let event = StreamingEvents.stopped(options: VideoTrackingOptions(),
+                                            state: state(position: 5, duration: 100, reason: .error, errorMessage: "boom"))
+
+        XCTAssertEqual(event.eventProperties?["stop_reason"] as? String, "error")
+        XCTAssertEqual(event.eventProperties?["error_message"] as? String, "boom")
+    }
+
+    /// The lane follows the reason: only a `timeout` leaves the row open for a later refresh.
+    func testTimeoutIsTheOnlyDelayedStop() {
+        XCTAssertEqual(StreamingEvents.stopped(options: VideoTrackingOptions(),
+                                               state: state(position: 5, duration: 100, reason: .timeout)).kind,
+                       .delayed)
+        for reason: StreamingStopReason in [.paused, .ended, .error, .untracked] {
+            XCTAssertEqual(StreamingEvents.stopped(options: VideoTrackingOptions(),
+                                                   state: state(position: 5, duration: 100, reason: reason)).kind,
+                           .instant,
+                           "\(reason.rawValue) finalizes the row")
+        }
+    }
+
+    func testLiveOmitsDurationAndPercentAndInfersDeliveryMode() {
+        let event = StreamingEvents.stopped(options: VideoTrackingOptions(contentId: "live-1"),
+                                            state: state(position: 5, duration: nil, reason: .timeout))
+
         let props = event.eventProperties!
         XCTAssertNil(props["duration"])
         XCTAssertNil(props["percent_completed"])
-        XCTAssertEqual(props["content_type"] as? String, "Live")
+        XCTAssertEqual(props["delivery_mode"] as? String, "live")
     }
 
-    func testStartedCarriesStartPosition() {
-        let player = FakeVideoPlayer()
-        player.duration = 100
-        let event = VideoEvents.started(
-            options: VideoTrackingOptions(contentId: "ep-1", contentType: .vod),
-            player: player, viewSessionId: "vs-1", startPosition: 10)
-        XCTAssertEqual(event.eventType, "Video Content Started")
-        XCTAssertEqual(event.eventProperties?["start_position"] as? TimeInterval, 10)
-        XCTAssertEqual(event.eventProperties?["view_session_id"] as? String, "vs-1")
+    func testPercentIsClampedAndZeroDurationIsSafe() {
+        let over = StreamingEvents.stopped(options: VideoTrackingOptions(),
+                                           state: state(position: 150, duration: 100, reason: .ended))
+        XCTAssertEqual(over.eventProperties?["percent_completed"] as? Double, 100)
+
+        let zero = StreamingEvents.stopped(options: VideoTrackingOptions(),
+                                           state: state(position: 5, duration: 0, reason: .ended))
+        XCTAssertEqual(zero.eventProperties?["percent_completed"] as? Double, 0)
+    }
+
+    func testExtraPropertiesHaveLowestPrecedence() {
+        let options = VideoTrackingOptions(contentId: "real", extraEventProperties: ["content_id": "extra", "custom": 1])
+        let event = StreamingEvents.started(options: options, state: state(position: 0, duration: 10))
+
+        XCTAssertEqual(event.eventProperties?["content_id"] as? String, "real")
+        XCTAssertEqual(event.eventProperties?["custom"] as? Int, 1)
+    }
+
+    private func state(position: TimeInterval,
+                       duration: TimeInterval?,
+                       streamDuration: TimeInterval = 0,
+                       reason: StreamingStopReason? = nil,
+                       errorMessage: String? = nil,
+                       insertId: String = "stop-1") -> StreamingState {
+        StreamingState(streamSessionId: "vs-1", playId: "play-1", insertId: insertId, at: at,
+                       startTime: 10, position: position, duration: duration,
+                       streamDuration: streamDuration, stopReason: reason, errorMessage: errorMessage)
     }
 }
