@@ -1,64 +1,18 @@
 import AVFoundation
 import Foundation
 
-/// Concrete `VideoPlayer` adapter that wraps an `AVFoundation.AVPlayer` and translates its
-/// KVO-observable state and notifications into `VideoPlayerEvent`s.
-///
-/// Deliberately **internal**: how the SDK subscribes to AVFoundation is an implementation detail,
-/// and callers must not drive `startObserving()`/`stopObserving()` themselves — doing so detaches
-/// observation without finalizing the in-flight snapshot. Consumers reach this adapter through the
-/// plugin's `trackVideo(player:options:)` entry point, which owns the observation lifecycle; the
-/// public extension point for custom/vendor players is the `VideoPlayer` protocol.
-///
-/// v1 assumption: `currentItem` is expected to be set (or left nil for the lifetime of this
-/// instance) before `startObserving()` is called. Item-level observers are attached once, against
-/// whatever `player.currentItem` is at `startObserving()` time; if the caller swaps
-/// `player.replaceCurrentItem(with:)` afterwards, item-scoped observation (`.ended`, `.seeking`,
-/// `.error`, `.bufferingEnded`) will keep referring to the original item, not the new one.
-///
-/// In v1 the consumer must therefore end and restart *tracking* around an item swap, so the old
-/// snapshot is finalized (`timeout: 0`) rather than left to expire on its TTL:
-///
-/// ```swift
-/// let stopTracking = plugin.trackVideo(player: avPlayer, options: oldOptions)
-/// // ...
-/// stopTracking()                    // finalizes the old snapshot (timeout: 0) + stopObserving()
-/// avPlayer.replaceCurrentItem(with: newItem)
-/// let stopTracking2 = plugin.trackVideo(player: avPlayer, options: newOptions)  // new viewSessionId
-/// ```
-///
-/// `AVQueuePlayer` advances `currentItem` internally with no hook for this recipe and is not
-/// supported in v1. Automatic re-attachment (KVO on `player.currentItem`) is deferred to v2,
-/// where an item swap must also surface to the tracking layer as a content change (new view
-/// session with fresh caller-supplied metadata).
-final class AVPlayerVideoPlayer: VideoPlayer {
-    private let player: AVPlayer
+/// `Player` over an `AVPlayer`, held weakly so the session ends when the app's player goes away.
+final class AVPlayerAdapter: Player {
+    private weak var player: AVPlayer?
     private var isObserving = false
 
-    private var timeControlStatusToken: NSKeyValueObservation?
+    private var timeControlStatusObserver: TimeControlStatusObserver?
     private var itemStatusToken: NSKeyValueObservation?
-    private var itemLikelyToKeepUpToken: NSKeyValueObservation?
-
     private var didPlayToEndObserver: NSObjectProtocol?
-    /// Backs the `AVPlayerItemTimeJumpedNotification` (imported into Swift as
-    /// `.AVPlayerItemTimeJumped`) subscription — the brief's `AVPlayer.timeJumpedNotification`
-    /// does not exist; the notification is posted by `AVPlayerItem`, not `AVPlayer`.
     private var timeJumpedObserver: NSObjectProtocol?
 
-    var onEvent: ((VideoPlayerEvent) -> Void)?
-
-    var currentTime: TimeInterval {
-        let seconds = player.currentTime().seconds
-        return seconds.isFinite ? seconds : 0
-    }
-
-    var duration: TimeInterval? {
-        guard let item = player.currentItem else { return nil }
-        let duration = item.duration
-        guard !duration.isIndefinite else { return nil }
-        let seconds = duration.seconds
-        return seconds.isFinite ? seconds : nil
-    }
+    // Written once per `startObserving`, before any observer exists; read on AVFoundation's threads.
+    private var onEvent: ((PlayerEvent) -> Void)?
 
     init(_ player: AVPlayer) {
         self.player = player
@@ -68,81 +22,57 @@ final class AVPlayerVideoPlayer: VideoPlayer {
         stopObserving()
     }
 
-    func startObserving() {
-        guard !isObserving else { return }
-        isObserving = true
-
-        timeControlStatusToken = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-            self?.handleTimeControlStatusChange(player.timeControlStatus)
-        }
-
-        // Item-level KVO and notifications are only registered when there's a current item at
-        // startObserving() time, and always scoped to that specific item (never `object: nil`,
-        // which would observe every AVPlayerItem in the process and cause cross-talk with
-        // unrelated players elsewhere in the host app). This mirrors the documented v1
-        // currentItem-swap assumption above: all item-level observation attaches to the item
-        // present at startObserving() time, or not at all.
-        if let item = player.currentItem {
-            // `.initial` as well as `.new`: `status` is monotonic with `.failed` terminal, so an
-            // item that already failed before observation began would otherwise never report it.
-            // `.initial` delivers that value atomically as part of registration, leaving no window
-            // in which a transition could both fire KVO *and* be replayed afterwards — which would
-            // double-report the error. Side-effect-free for the ordinary case, because
-            // `handleItemStatusChange` ignores every status but `.failed`.
-            itemStatusToken = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-                self?.handleItemStatusChange(item)
-            }
-            itemLikelyToKeepUpToken = item.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
-                self?.handleLikelyToKeepUpChange(item.isPlaybackLikelyToKeepUp)
-            }
-
-            didPlayToEndObserver = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime,
-                object: item,
-                queue: nil
-            ) { [weak self] _ in
-                self?.onEvent?(.ended)
-            }
-
-            timeJumpedObserver = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemTimeJumped,
-                object: item,
-                queue: nil
-            ) { [weak self] _ in
-                self?.onEvent?(.seeking)
-            }
-        }
-
-        emitCurrentPlaybackState()
+    private func emit(_ event: PlayerEvent) {
+        onEvent?(event)
     }
 
-    /// Replays an already-playing player, which `.new`-only KVO cannot deliver because the
-    /// transition predates `startObserving()`. Without it, attaching to a player that is already
-    /// playing emits no `.played`, so no view session is ever opened for it.
-    ///
-    /// `timeControlStatus` cannot use the `.initial` trick that `status` does above: its initial
-    /// value is meaningful for every player, so `.initial` would emit a spurious `.paused` on every
-    /// `startObserving()` for a freshly-created one. The cost of reading it after registration is a
-    /// narrow window — if the player starts playing between registration and this read, KVO and
-    /// this replay can both emit `.played`. Consumers must therefore treat a repeated `.played`
-    /// with no intervening `.paused` as a no-op; the tracker's state machine emits STARTED on
-    /// pause→play transitions, so it already does.
-    ///
-    /// Called synchronously from `startObserving()`, so consumers may receive an event before that
-    /// call returns.
-    private func emitCurrentPlaybackState() {
+    func sample() -> PlayerSample? {
+        guard let player else { return nil }
+        let seconds = player.currentTime().seconds
+        return PlayerSample(position: seconds.isFinite ? seconds : 0, duration: duration(of: player.currentItem))
+    }
+
+    private func duration(of item: AVPlayerItem?) -> TimeInterval? {
+        guard let item, !item.duration.isIndefinite else { return nil }
+        let seconds = item.duration.seconds
+        return seconds.isFinite ? seconds : nil
+    }
+
+    func startObserving(onEvent: @escaping (PlayerEvent) -> Void) {
+        guard !isObserving, let player else { return }
+        isObserving = true
+        self.onEvent = onEvent
+
+        timeControlStatusObserver = TimeControlStatusObserver(player: player) { [weak self] status in
+            self?.handle(status)
+        }
+
+        // Item observers are scoped to this item, never `object: nil`, so other players in the app cannot cross-talk.
+        if let item = player.currentItem {
+            // `.initial` so an item that failed before observation began still reports it, exactly once.
+            itemStatusToken = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+                guard item.status == .failed else { return }
+                self?.emit(.error(message: item.error?.localizedDescription))
+            }
+            didPlayToEndObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: nil
+            ) { [weak self] _ in self?.emit(.ended) }
+            timeJumpedObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemTimeJumped, object: item, queue: nil
+            ) { [weak self] _ in self?.emit(.seeking) }
+        }
+
+        // `.new`-only KVO never reports a player that was already playing.
         if player.timeControlStatus == .playing {
-            onEvent?(.played)
+            onEvent(.played)
         }
     }
 
     func stopObserving() {
         isObserving = false
-
-        timeControlStatusToken = nil
+        timeControlStatusObserver?.invalidate()
+        timeControlStatusObserver = nil
         itemStatusToken = nil
-        itemLikelyToKeepUpToken = nil
-
         if let didPlayToEndObserver {
             NotificationCenter.default.removeObserver(didPlayToEndObserver)
             self.didPlayToEndObserver = nil
@@ -153,25 +83,55 @@ final class AVPlayerVideoPlayer: VideoPlayer {
         }
     }
 
-    private func handleTimeControlStatusChange(_ status: AVPlayer.TimeControlStatus) {
+    private func handle(_ status: AVPlayer.TimeControlStatus) {
         switch status {
         case .playing:
-            onEvent?(.played)
+            emit(.played)
         case .paused:
-            onEvent?(.paused)
+            emit(.paused)
         case .waitingToPlayAtSpecifiedRate:
-            onEvent?(.buffering)
+            break
         @unknown default:
             break
         }
     }
+}
 
-    private func handleItemStatusChange(_ item: AVPlayerItem) {
-        guard item.status == .failed else { return }
-        onEvent?(.error(message: item.error?.localizedDescription))
+// Classic KVO: block-based gives `change.newValue == nil` for `@objc` enums, leaving only the live
+// property, which under concurrent transitions is a newer status than the one that fired.
+private final class TimeControlStatusObserver: NSObject {
+    private static let keyPath = #keyPath(AVPlayer.timeControlStatus)
+
+    private weak var player: AVPlayer?
+    private let onChange: (AVPlayer.TimeControlStatus) -> Void
+
+    init(player: AVPlayer, onChange: @escaping (AVPlayer.TimeControlStatus) -> Void) {
+        self.player = player
+        self.onChange = onChange
+        super.init()
+        player.addObserver(self, forKeyPath: Self.keyPath, options: [.new], context: nil)
     }
 
-    private func handleLikelyToKeepUpChange(_ isLikelyToKeepUp: Bool) {
-        onEvent?(isLikelyToKeepUp ? .bufferingEnded : .buffering)
+    deinit {
+        invalidate()
+    }
+
+    // No-op once the player is gone: it took its registrations with it.
+    func invalidate() {
+        guard let player else { return }
+        player.removeObserver(self, forKeyPath: Self.keyPath)
+        self.player = nil
+    }
+
+    // swiftlint:disable:next block_based_kvo
+    override func observeValue(forKeyPath keyPath: String?,
+                               of object: Any?,
+                               change: [NSKeyValueChangeKey: Any]?,
+                               context: UnsafeMutableRawPointer?) {
+        guard keyPath == Self.keyPath,
+              let raw = (change?[.newKey] as? NSNumber)?.intValue,
+              let status = AVPlayer.TimeControlStatus(rawValue: raw)
+        else { return }
+        onChange(status)
     }
 }
