@@ -5,6 +5,13 @@ import XCTest
 
 // Scope: bare AVPlayer only (no item, no media); playback-driven events are covered by the integration tests.
 final class AVPlayerAdapterTests: XCTestCase {
+    private let deliveryQueue = DispatchQueue(label: "test.delivery")
+
+    /// Barrier: every event the adapter has already enqueued has run by the time this returns.
+    private func flush() {
+        deliveryQueue.sync {}
+    }
+
     func testSampleOfBarePlayerIsZeroPositionAndNilDuration() {
         let player = AVPlayer()
         let sut = AVPlayerAdapter(player)
@@ -14,18 +21,22 @@ final class AVPlayerAdapterTests: XCTestCase {
     func testSampleIsNilAfterThePlayerIsReleased() {
         var player: AVPlayer? = AVPlayer()
         let sut = AVPlayerAdapter(player!)
-        sut.startObserving()
+        deliveryQueue.sync { sut.startObserving(deliveryQueue: deliveryQueue) }
         player = nil
-        XCTAssertNil(sut.sample(), "a session must notice its player is gone while still observing")
-        sut.stopObserving()
+        deliveryQueue.sync {
+            XCTAssertNil(sut.sample(), "a session must notice its player is gone while still observing")
+            sut.stopObserving()
+        }
     }
 
     func testStartThenStopObservingDoesNotCrash() {
         let player = AVPlayer()
         let sut = AVPlayerAdapter(player)
         withExtendedLifetime(player) {
-            sut.startObserving()
-            sut.stopObserving()
+            deliveryQueue.sync {
+                sut.startObserving(deliveryQueue: deliveryQueue)
+                sut.stopObserving()
+            }
         }
     }
 
@@ -38,9 +49,11 @@ final class AVPlayerAdapterTests: XCTestCase {
         let player = AVPlayer()
         let sut = AVPlayerAdapter(player)
         withExtendedLifetime(player) {
-            sut.startObserving()
-            sut.startObserving()
-            sut.stopObserving()
+            deliveryQueue.sync {
+                sut.startObserving(deliveryQueue: deliveryQueue)
+                sut.startObserving(deliveryQueue: deliveryQueue)
+                sut.stopObserving()
+            }
         }
     }
 
@@ -48,7 +61,7 @@ final class AVPlayerAdapterTests: XCTestCase {
         let player = AVPlayer()
         var sut: AVPlayerAdapter? = AVPlayerAdapter(player)
         withExtendedLifetime(player) {
-            sut?.startObserving()
+            deliveryQueue.sync { sut?.startObserving(deliveryQueue: deliveryQueue) }
             sut = nil
         }
     }
@@ -64,45 +77,51 @@ final class AVPlayerAdapterTests: XCTestCase {
         let sut = AVPlayerAdapter(player)
         var received: [PlayerEvent] = []
         sut.onEvent = { received.append($0) }
-        sut.startObserving()
+        deliveryQueue.sync { sut.startObserving(deliveryQueue: deliveryQueue) }
 
         // A bare player with no item goes to `.waitingToPlayAtSpecifiedRate` on `play()`.
         player.play()
-        XCTAssertEqual(received, [])
+        flush()
+        XCTAssertEqual(deliveryQueue.sync { received }, [])
         player.pause()
-        XCTAssertEqual(received, [.paused])
+        flush()
+        XCTAssertEqual(deliveryQueue.sync { received }, [.paused])
 
-        sut.stopObserving()
-        sut.onEvent = nil
+        deliveryQueue.sync { sut.stopObserving() }
         player.play()
-        XCTAssertEqual(received, [.paused], "nothing after teardown")
+        flush()
+        XCTAssertEqual(deliveryQueue.sync { received }, [.paused], "nothing after teardown")
     }
 
-    // Regression: `onEvent` is written by the SDK's queue while AVFoundation delivers events on its
-    // own threads. Meaningful under `--sanitize=thread`; unsanitized it only catches a crash.
-    func testOnEventCanBeReplacedWhileEventsAreDelivered() {
-        let player = AVPlayer()
-        let sut = AVPlayerAdapter(player)
-        let received = LockedCounter()
-        sut.onEvent = { _ in received.increment() }
-        sut.startObserving()
+    // The Model 2 guarantee: an event reaching the queue after `stopObserving()` is dropped by
+    // construction, not by a narrow race. Model 1 measured 7 late deliveries out of 49,501 here.
+    func testNoEventArrivesAfterStopObserving() {
+        var lateEvents = 0
+        for _ in 0..<200 {
+            let player = AVPlayer()
+            let sut = AVPlayerAdapter(player)
+            var stopped = false
+            sut.onEvent = { _ in if stopped { lateEvents += 1 } }
+            deliveryQueue.sync { sut.startObserving(deliveryQueue: deliveryQueue) }
 
-        let replaced = expectation(description: "handler replaced repeatedly")
-        DispatchQueue.global().async {
-            for _ in 0..<500 {
-                sut.onEvent = { _ in received.increment() }
+            let churn = DispatchQueue(label: "churn")
+            let done = expectation(description: "churn")
+            churn.async {
+                for _ in 0..<400 {
+                    player.play()
+                    player.pause()
+                }
+                done.fulfill()
             }
-            replaced.fulfill()
+            Thread.sleep(forTimeInterval: 0.002)
+            deliveryQueue.sync {
+                sut.stopObserving()
+                stopped = true
+            }
+            wait(for: [done], timeout: 20)
+            flush()
         }
-        for _ in 0..<500 {
-            player.play()
-            player.pause()
-        }
-        wait(for: [replaced], timeout: 10)
-
-        sut.stopObserving()
-        sut.onEvent = nil
-        XCTAssertGreaterThan(received.value, 0, "the pauses must have reached some handler")
+        XCTAssertEqual(deliveryQueue.sync { lateEvents }, 0)
     }
 
     // Regression: must not register `object: nil` notification observers, or it would react to
@@ -113,25 +132,15 @@ final class AVPlayerAdapterTests: XCTestCase {
         var receivedEvents: [PlayerEvent] = []
         sut.onEvent = { receivedEvents.append($0) }
         withExtendedLifetime(player) {
-            sut.startObserving()
+            deliveryQueue.sync { sut.startObserving(deliveryQueue: deliveryQueue) }
 
             let unrelatedObject = NSObject()
             NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: unrelatedObject)
             NotificationCenter.default.post(name: .AVPlayerItemTimeJumped, object: unrelatedObject)
 
-            XCTAssertTrue(receivedEvents.isEmpty)
-            sut.stopObserving()
+            flush()
+            XCTAssertTrue(deliveryQueue.sync { receivedEvents }.isEmpty)
+            deliveryQueue.sync { sut.stopObserving() }
         }
-    }
-}
-
-private final class LockedCounter {
-    private let lock = NSLock()
-    private var count = 0
-
-    var value: Int { lock.withLock { count } }
-
-    func increment() {
-        lock.withLock { count += 1 }
     }
 }

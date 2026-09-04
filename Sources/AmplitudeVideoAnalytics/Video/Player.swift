@@ -13,10 +13,13 @@ enum PlayerEvent: Equatable {
     case error(message: String?)
 }
 
+/// Everything here is confined to the queue handed to `startObserving(deliveryQueue:)`: the SDK
+/// calls `sample()`, `stopObserving()` and sets `onEvent` on it, and implementations must deliver
+/// `onEvent` on it too. That confinement is what makes a lock unnecessary on either side.
 protocol Player: AnyObject {
     func sample() -> PlayerSample?
-    // Fires on any thread.
     var onEvent: ((PlayerEvent) -> Void)? { get set }
-    func startObserving()
+    /// Retain `deliveryQueue` and deliver every event on it, however the underlying player reports.
+    func startObserving(deliveryQueue: DispatchQueue)
     func stopObserving()
 }

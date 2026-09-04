@@ -17,6 +17,7 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
     private static var sharedAssetURL: URL?
 
     private var assetURL: URL!
+    private let deliveryQueue = DispatchQueue(label: "test.delivery")
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -39,12 +40,13 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
     func testDurationReflectsAssetAndCurrentTimeAdvancesDuringPlayback() {
         let player = AVPlayer(url: assetURL)
         let sut = AVPlayerAdapter(player)
-        sut.startObserving()
-        addTeardownBlock { sut.stopObserving() }
+        deliveryQueue.sync { sut.startObserving(deliveryQueue: self.deliveryQueue) }
+        addTeardownBlock { self.deliveryQueue.sync { sut.stopObserving() } }
 
         waitForItemReady(player)
 
-        guard let duration = sut.sample()?.duration else {
+        let sampledDuration: TimeInterval? = deliveryQueue.sync { sut.sample()?.duration }
+        guard let duration = sampledDuration else {
             return XCTFail("Expected a non-nil duration for a finite local asset")
         }
         XCTAssertEqual(duration, Self.assetDurationSeconds, accuracy: 0.3)
@@ -66,7 +68,7 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         }
         player.pause()
 
-        XCTAssertGreaterThan(sut.sample()?.position ?? 0, 0)
+        XCTAssertGreaterThan(deliveryQueue.sync { sut.sample()?.position } ?? 0, 0)
     }
 
     func testPlayedEventFiresOnPlay() {
@@ -74,8 +76,8 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         let sut = AVPlayerAdapter(player)
         let played = expectation(description: "played")
         sut.onEvent = { if $0 == .played { played.fulfill() } }
-        sut.startObserving()
-        addTeardownBlock { sut.stopObserving() }
+        deliveryQueue.sync { sut.startObserving(deliveryQueue: self.deliveryQueue) }
+        addTeardownBlock { self.deliveryQueue.sync { sut.stopObserving() } }
 
         player.play()
         wait(for: [played], timeout: 10)
@@ -90,8 +92,8 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
             if event == .played { played.fulfill() }
             if event == .paused { paused.fulfill() }
         }
-        sut.startObserving()
-        addTeardownBlock { sut.stopObserving() }
+        deliveryQueue.sync { sut.startObserving(deliveryQueue: self.deliveryQueue) }
+        addTeardownBlock { self.deliveryQueue.sync { sut.stopObserving() } }
 
         player.play()
         wait(for: [played], timeout: 10)
@@ -102,13 +104,13 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
     func testSeekingEventFiresOnSeek() {
         let player = AVPlayer(url: assetURL)
         let sut = AVPlayerAdapter(player)
-        sut.startObserving()
-        addTeardownBlock { sut.stopObserving() }
+        deliveryQueue.sync { sut.startObserving(deliveryQueue: self.deliveryQueue) }
+        addTeardownBlock { self.deliveryQueue.sync { sut.stopObserving() } }
 
         waitForItemReady(player)
 
         let seeking = expectation(description: "seeking")
-        sut.onEvent = { if $0 == .seeking { seeking.fulfill() } }
+        deliveryQueue.sync { sut.onEvent = { if $0 == .seeking { seeking.fulfill() } } }
 
         let seekCompleted = expectation(description: "seek completed")
         player.seek(to: CMTime(value: 5, timescale: 10)) { _ in seekCompleted.fulfill() }
@@ -121,8 +123,8 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         let sut = AVPlayerAdapter(player)
         let ended = expectation(description: "ended")
         sut.onEvent = { if $0 == .ended { ended.fulfill() } }
-        sut.startObserving()
-        addTeardownBlock { sut.stopObserving() }
+        deliveryQueue.sync { sut.startObserving(deliveryQueue: self.deliveryQueue) }
+        addTeardownBlock { self.deliveryQueue.sync { sut.stopObserving() } }
 
         player.play()
         wait(for: [ended], timeout: 15)
@@ -135,8 +137,8 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         let sut = AVPlayerAdapter(player)
         let errored = expectation(description: "error")
         sut.onEvent = { if case .error = $0 { errored.fulfill() } }
-        sut.startObserving()
-        addTeardownBlock { sut.stopObserving() }
+        deliveryQueue.sync { sut.startObserving(deliveryQueue: self.deliveryQueue) }
+        addTeardownBlock { self.deliveryQueue.sync { sut.stopObserving() } }
 
         wait(for: [errored], timeout: 10)
     }
@@ -159,8 +161,8 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         let sut = AVPlayerAdapter(player)
         let errored = expectation(description: "error")
         sut.onEvent = { if case .error = $0 { errored.fulfill() } }
-        sut.startObserving()
-        addTeardownBlock { sut.stopObserving() }
+        deliveryQueue.sync { sut.startObserving(deliveryQueue: self.deliveryQueue) }
+        addTeardownBlock { self.deliveryQueue.sync { sut.stopObserving() } }
 
         wait(for: [errored], timeout: 10)
     }
@@ -182,8 +184,8 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         let sut = AVPlayerAdapter(player)
         let played = expectation(description: "played")
         sut.onEvent = { if $0 == .played { played.fulfill() } }
-        sut.startObserving()
-        addTeardownBlock { sut.stopObserving() }
+        deliveryQueue.sync { sut.startObserving(deliveryQueue: self.deliveryQueue) }
+        addTeardownBlock { self.deliveryQueue.sync { sut.stopObserving() } }
 
         wait(for: [played], timeout: 10)
     }

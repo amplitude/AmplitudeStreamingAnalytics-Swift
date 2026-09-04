@@ -4,21 +4,26 @@ import Foundation
 /// `Player` over an `AVPlayer`, held weakly so the session ends when the app's player goes away.
 final class AVPlayerAdapter: Player {
     private weak var player: AVPlayer?
+
+    // All of these are confined to `deliveryQueue` once observing, so none of them need a lock.
+    private var deliveryQueue: DispatchQueue?
     private var isObserving = false
+    private var onEventStorage: ((PlayerEvent) -> Void)?
 
     private var timeControlStatusObserver: TimeControlStatusObserver?
     private var itemStatusToken: NSKeyValueObservation?
     private var didPlayToEndObserver: NSObjectProtocol?
     private var timeJumpedObserver: NSObjectProtocol?
 
-    // Written by the SDK's queue, read on AVFoundation's threads: races on the closure itself.
-    private let eventLock = NSLock()
-    private var _onEvent: ((PlayerEvent) -> Void)?
-    private var isEmitting = false
-
     var onEvent: ((PlayerEvent) -> Void)? {
-        get { eventLock.withLock { _onEvent } }
-        set { eventLock.withLock { _onEvent = newValue } }
+        get {
+            assertOnDeliveryQueue()
+            return onEventStorage
+        }
+        set {
+            assertOnDeliveryQueue()
+            onEventStorage = newValue
+        }
     }
 
     init(_ player: AVPlayer) {
@@ -26,16 +31,14 @@ final class AVPlayerAdapter: Player {
     }
 
     deinit {
-        stopObserving()
-    }
-
-    // Called outside the lock: a handler that reaches back in would deadlock.
-    private func emit(_ event: PlayerEvent) {
-        let handler = eventLock.withLock { isEmitting ? _onEvent : nil }
-        handler?(event)
+        // Not `stopObserving()`: deinit runs on whatever thread drops the last reference, and no
+        // other reference can exist by now, so the queue assertion neither holds nor is needed.
+        isObserving = false
+        removeObservers()
     }
 
     func sample() -> PlayerSample? {
+        assertOnDeliveryQueue()
         guard let player else { return nil }
         let seconds = player.currentTime().seconds
         return PlayerSample(position: seconds.isFinite ? seconds : 0, duration: duration(of: player.currentItem))
@@ -47,13 +50,19 @@ final class AVPlayerAdapter: Player {
         return seconds.isFinite ? seconds : nil
     }
 
-    func startObserving() {
+    func startObserving(deliveryQueue: DispatchQueue) {
+        dispatchPrecondition(condition: .onQueue(deliveryQueue))
         guard !isObserving, let player else { return }
+        self.deliveryQueue = deliveryQueue
         isObserving = true
-        eventLock.withLock { isEmitting = true }
 
         timeControlStatusObserver = TimeControlStatusObserver(player: player) { [weak self] status in
-            self?.handle(status)
+            switch status {
+            case .playing: self?.emit(.played)
+            case .paused: self?.emit(.paused)
+            case .waitingToPlayAtSpecifiedRate: break
+            @unknown default: break
+            }
         }
 
         // Item observers are scoped to this item, never `object: nil`, so other players in the app cannot cross-talk.
@@ -78,8 +87,26 @@ final class AVPlayerAdapter: Player {
     }
 
     func stopObserving() {
+        if let deliveryQueue {
+            dispatchPrecondition(condition: .onQueue(deliveryQueue))
+        }
         isObserving = false
-        eventLock.withLock { isEmitting = false }
+        removeObservers()
+    }
+
+    // Always a hop, never a direct call: events originate on AVFoundation's threads, and hopping
+    // unconditionally keeps one FIFO order for all five of them. An event enqueued before
+    // `stopObserving()` runs before it; one enqueued after sees `isObserving == false` and is
+    // dropped, which is what makes late delivery impossible rather than merely unlikely.
+    private func emit(_ event: PlayerEvent) {
+        guard let deliveryQueue else { return }
+        deliveryQueue.async { [weak self] in
+            guard let self, self.isObserving else { return }
+            self.onEventStorage?(event)
+        }
+    }
+
+    private func removeObservers() {
         timeControlStatusObserver?.invalidate()
         timeControlStatusObserver = nil
         itemStatusToken = nil
@@ -93,16 +120,10 @@ final class AVPlayerAdapter: Player {
         }
     }
 
-    private func handle(_ status: AVPlayer.TimeControlStatus) {
-        switch status {
-        case .playing:
-            emit(.played)
-        case .paused:
-            emit(.paused)
-        case .waitingToPlayAtSpecifiedRate:
-            break
-        @unknown default:
-            break
+    // Before `startObserving` there is no queue yet, so `onEvent` may be set from anywhere.
+    private func assertOnDeliveryQueue() {
+        if let deliveryQueue {
+            dispatchPrecondition(condition: .onQueue(deliveryQueue))
         }
     }
 }
