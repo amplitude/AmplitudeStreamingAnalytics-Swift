@@ -1,52 +1,39 @@
 import AmplitudeSwift
 import Foundation
 
-/// Pure-function builders for the two video lifecycle events. No state, no networking.
-enum VideoEvents {
-    static let startedType = "Video Content Started"
-    static let stoppedType = "Video Content Stopped"
+/// The only place the wire taxonomy is spelled out. Pure functions.
+enum StreamingEvents {
+    static let startedType = "[Amplitude] Video Content Started"
+    static let stoppedType = "[Amplitude] Video Content Stopped"
 
-    static func started(
-        options: VideoTrackingOptions,
-        player: VideoPlayer,
-        viewSessionId: String,
-        startPosition: TimeInterval
-    ) -> BaseEvent {
-        var properties = baseProperties(options: options, player: player, viewSessionId: viewSessionId)
-        properties["start_position"] = startPosition
-        return makeEvent(type: startedType, properties: properties)
+    static func started(options: VideoTrackingOptions, state: StreamingState) -> DelayedEvent {
+        makeEvent(type: startedType,
+                  state: state,
+                  kind: .instant,
+                  properties: baseProperties(options: options, state: state))
     }
 
-    // swiftlint:disable:next function_parameter_count
-    static func stoppedSnapshot(
-        options: VideoTrackingOptions,
-        player: VideoPlayer,
-        viewSessionId: String,
-        watchDuration: TimeInterval,
-        stopReason: String?,
-        errorMessage: String?
-    ) -> BaseEvent {
-        var properties = baseProperties(options: options, player: player, viewSessionId: viewSessionId)
-        properties["current_time"] = player.currentTime
-        properties["watch_duration"] = watchDuration
-        if let duration = player.duration {
-            properties["duration"] = duration
-            properties["percent_completed"] = duration == 0 ? 0 : player.currentTime / duration
+    /// `timeout` is the reason the server holds a row open, so it is the only one that stays in the
+    /// delayed lane; every other reason is what finalizes that row.
+    static func stopped(options: VideoTrackingOptions, state: StreamingState) -> DelayedEvent {
+        var properties = baseProperties(options: options, state: state)
+        properties["watch_duration"] = state.watchDuration
+        if let duration = state.duration {
+            properties["percent_completed"] = percentCompleted(position: state.position, duration: duration)
         }
-        if let stopReason {
-            properties["stop_reason"] = stopReason
+        if let stopReason = state.stopReason {
+            properties["stop_reason"] = stopReason.rawValue
         }
-        if let errorMessage {
+        if let errorMessage = state.errorMessage {
             properties["error_message"] = errorMessage
         }
-        return makeEvent(type: stoppedType, properties: properties)
+        return makeEvent(type: stoppedType,
+                         state: state,
+                         kind: state.stopReason == .timeout ? .delayed : .instant,
+                         properties: properties)
     }
 
-    private static func baseProperties(
-        options: VideoTrackingOptions,
-        player: VideoPlayer,
-        viewSessionId: String
-    ) -> [String: Any] {
+    private static func baseProperties(options: VideoTrackingOptions, state: StreamingState) -> [String: Any] {
         var properties = options.extraEventProperties
         if let contentId = options.contentId {
             properties["content_id"] = contentId
@@ -54,23 +41,30 @@ enum VideoEvents {
         if let title = options.title {
             properties["title"] = title
         }
-        properties["content_type"] = resolvedContentType(options: options, player: player)
-        properties["view_session_id"] = viewSessionId
+        properties["content_type"] = (options.contentType ?? (state.duration == nil ? .live : .vod)).rawValue
+        properties["view_session_id"] = state.viewSessionId
+        properties["play_id"] = state.playId
+        if let duration = state.duration {
+            properties["duration"] = duration
+        }
+        properties["start_time"] = state.startTime
+        properties["position"] = state.position
         return properties
     }
 
-    private static func resolvedContentType(options: VideoTrackingOptions, player: VideoPlayer) -> String {
-        if let contentType = options.contentType {
-            return contentType.rawValue
-        }
-        return player.duration == nil ? VideoContentType.live.rawValue : VideoContentType.vod.rawValue
+    private static func percentCompleted(position: TimeInterval, duration: TimeInterval) -> Double {
+        guard duration > 0, position.isFinite else { return 0 }
+        return min(100, max(0, position / duration * 100))
     }
 
-    private static func makeEvent(type: String, properties: [String: Any]) -> BaseEvent {
-        BaseEvent(
-            timestamp: Int64(Date().timeIntervalSince1970 * 1000),
-            eventType: type,
-            eventProperties: properties
-        )
+    private static func makeEvent(type: String,
+                                  state: StreamingState,
+                                  kind: DelayedEvent.Kind,
+                                  properties: [String: Any]) -> DelayedEvent {
+        let event = BaseEvent(timestamp: Int64(state.at.timeIntervalSince1970 * 1000),
+                              eventType: type,
+                              eventProperties: properties)
+        event.insertId = state.insertId
+        return DelayedEvent(copying: event, kind: kind)
     }
 }
