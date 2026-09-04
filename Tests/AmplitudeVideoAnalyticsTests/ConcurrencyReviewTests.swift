@@ -36,7 +36,7 @@ final class DeinitFinalizationTests: XCTestCase {
             player.fire(.played)
 
             let arrived = expectation(description: "play arrived")
-            uploader.whenUploadArrives(matching: { !$0.events.isEmpty }) { arrived.fulfill() }
+            uploader.whenUploadArrives(matching: { !$0.events.isEmpty }, notify: { arrived.fulfill() })
             wait(for: [arrived], timeout: 5)
 
             preReleaseCount = uploader.bodies.count
@@ -174,7 +174,7 @@ final class TimerPausedSessionTests: XCTestCase {
         player.fire(.played)
 
         let arrived = expectation(description: "play arrived")
-        uploader.whenUploadArrives(matching: { !$0.events.isEmpty }) { arrived.fulfill() }
+        uploader.whenUploadArrives(matching: { !$0.events.isEmpty }, notify: { arrived.fulfill() })
         wait(for: [arrived], timeout: 5)
 
         _ = uploader.bodies.count
@@ -263,7 +263,7 @@ final class DeinitOffQueueReadTests: XCTestCase {
             player.fire(.played)
 
             let arrived = expectation(description: "play arrived")
-            uploader.whenUploadArrives(matching: { !$0.events.isEmpty }) { arrived.fulfill() }
+            uploader.whenUploadArrives(matching: { !$0.events.isEmpty }, notify: { arrived.fulfill() })
             wait(for: [arrived], timeout: 5)
 
             preReleaseCount = uploader.bodies.count
