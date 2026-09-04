@@ -1,17 +1,22 @@
 import Foundation
 
-/// Lifecycle events a `VideoPlayer` implementation reports through `onEvent`.
-public enum VideoPlayerEvent: Equatable {
-    case played, paused, seeking, buffering, bufferingEnded, ended
+struct PlayerSample: Equatable {
+    let position: TimeInterval
+    let duration: TimeInterval?
+}
+
+enum PlayerEvent: Equatable {
+    case played
+    case paused
+    case seeking
+    case ended
     case error(message: String?)
 }
 
-/// Abstraction over a concrete video player (e.g. AVPlayer) that the SDK observes.
-public protocol VideoPlayer: AnyObject {
-    var currentTime: TimeInterval { get }
-    /// `nil` indicates live / unknown duration content.
-    var duration: TimeInterval? { get }
-    var onEvent: ((VideoPlayerEvent) -> Void)? { get set }
+protocol Player: AnyObject {
+    func sample() -> PlayerSample?
+    // Fires on any thread.
+    var onEvent: ((PlayerEvent) -> Void)? { get set }
     func startObserving()
     func stopObserving()
 }

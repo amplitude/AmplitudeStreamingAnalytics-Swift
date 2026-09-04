@@ -5,22 +5,9 @@ import XCTest
 
 @testable import AmplitudeVideoAnalytics
 
-// Scope: unlike `AVPlayerVideoPlayerTests` (bare AVPlayer, no item — pure lifecycle/teardown
-// safety), this class drives a REAL `AVPlayer` against a REAL, locally-generated (no network, no
-// HLS) H.264 asset to prove the adapter actually emits `VideoPlayerEvent`s end-to-end.
-//
-// These tests run BLOCKING in the normal suite (no quarantine/gating), so determinism outranks
-// coverage: every assertion is driven by an `XCTestExpectation` with a generous timeout and real
-// AVFoundation callbacks/KVO — never `Thread.sleep`-based sequencing of assertions. (The one
-// `Thread.sleep` in this file is a tight readiness poll inside asset *generation*, in `setUp`,
-// not part of any assertion timing.)
-//
-// `.buffering` / `.bufferingEnded` are intentionally NOT covered here: reproducing a genuine
-// playback stall deterministically needs either network throttling or a custom
-// `AVAssetResourceLoaderDelegate` that artificially delays data delivery — both are inherently
-// flaky, which is unacceptable for a blocking suite. Buffering is verified manually via the demo
-// app (Task 9b) instead.
-final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
+// Scope: unlike `AVPlayerAdapterTests` (bare AVPlayer), this drives a REAL `AVPlayer` against a
+// REAL, locally-generated H.264 asset to prove the adapter emits `PlayerEvent`s end-to-end.
+final class AVPlayerAdapterIntegrationTests: XCTestCase {
     /// 10 frames @ 10fps = 1.0s. Matches the asset generated in `makeSilentVideoAsset()`.
     private static let assetDurationSeconds = 1.0
 
@@ -51,13 +38,13 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
 
     func testDurationReflectsAssetAndCurrentTimeAdvancesDuringPlayback() {
         let player = AVPlayer(url: assetURL)
-        let sut = AVPlayerVideoPlayer(player)
+        let sut = AVPlayerAdapter(player)
         sut.startObserving()
         addTeardownBlock { sut.stopObserving() }
 
         waitForItemReady(player)
 
-        guard let duration = sut.duration else {
+        guard let duration = sut.sample()?.duration else {
             return XCTFail("Expected a non-nil duration for a finite local asset")
         }
         XCTAssertEqual(duration, Self.assetDurationSeconds, accuracy: 0.3)
@@ -79,12 +66,12 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
         }
         player.pause()
 
-        XCTAssertGreaterThan(sut.currentTime, 0)
+        XCTAssertGreaterThan(sut.sample()?.position ?? 0, 0)
     }
 
     func testPlayedEventFiresOnPlay() {
         let player = AVPlayer(url: assetURL)
-        let sut = AVPlayerVideoPlayer(player)
+        let sut = AVPlayerAdapter(player)
         let played = expectation(description: "played")
         sut.onEvent = { if $0 == .played { played.fulfill() } }
         sut.startObserving()
@@ -96,7 +83,7 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
 
     func testPausedEventFiresOnPause() {
         let player = AVPlayer(url: assetURL)
-        let sut = AVPlayerVideoPlayer(player)
+        let sut = AVPlayerAdapter(player)
         let played = expectation(description: "played")
         let paused = expectation(description: "paused")
         sut.onEvent = { event in
@@ -114,7 +101,7 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
 
     func testSeekingEventFiresOnSeek() {
         let player = AVPlayer(url: assetURL)
-        let sut = AVPlayerVideoPlayer(player)
+        let sut = AVPlayerAdapter(player)
         sut.startObserving()
         addTeardownBlock { sut.stopObserving() }
 
@@ -131,7 +118,7 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
 
     func testEndedEventFiresWhenPlaybackCompletes() {
         let player = AVPlayer(url: assetURL)
-        let sut = AVPlayerVideoPlayer(player)
+        let sut = AVPlayerAdapter(player)
         let ended = expectation(description: "ended")
         sut.onEvent = { if $0 == .ended { ended.fulfill() } }
         sut.startObserving()
@@ -145,7 +132,7 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
         let invalidURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("does-not-exist-\(UUID().uuidString).mp4")
         let player = AVPlayer(url: invalidURL)
-        let sut = AVPlayerVideoPlayer(player)
+        let sut = AVPlayerAdapter(player)
         let errored = expectation(description: "error")
         sut.onEvent = { if case .error = $0 { errored.fulfill() } }
         sut.startObserving()
@@ -169,7 +156,7 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
         wait(for: [failed], timeout: 10)
         statusToken?.invalidate()
 
-        let sut = AVPlayerVideoPlayer(player)
+        let sut = AVPlayerAdapter(player)
         let errored = expectation(description: "error")
         sut.onEvent = { if case .error = $0 { errored.fulfill() } }
         sut.startObserving()
@@ -192,7 +179,7 @@ final class AVPlayerVideoPlayerIntegrationTests: XCTestCase {
         wait(for: [playing], timeout: 10)
         statusToken.invalidate()
 
-        let sut = AVPlayerVideoPlayer(player)
+        let sut = AVPlayerAdapter(player)
         let played = expectation(description: "played")
         sut.onEvent = { if $0 == .played { played.fulfill() } }
         sut.startObserving()

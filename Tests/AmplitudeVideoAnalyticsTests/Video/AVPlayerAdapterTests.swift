@@ -3,89 +3,135 @@ import XCTest
 
 @testable import AmplitudeVideoAnalytics
 
-// Scope: these tests only exercise a bare `AVPlayer()` with no item / no network media, so they
-// stay CI- and simulator-safe. Real playback-driven event emission (`.played` / `.ended` / etc.
-// from actual media) is NOT unit-tested here — it is covered by the demo app (Task 9b).
-final class AVPlayerVideoPlayerTests: XCTestCase {
-    func testDurationIsNilForBarePlayer() {
-        let sut = AVPlayerVideoPlayer(AVPlayer())
-        XCTAssertNil(sut.duration)
+// Scope: bare AVPlayer only (no item, no media); playback-driven events are covered by the integration tests.
+final class AVPlayerAdapterTests: XCTestCase {
+    func testSampleOfBarePlayerIsZeroPositionAndNilDuration() {
+        let player = AVPlayer()
+        let sut = AVPlayerAdapter(player)
+        XCTAssertEqual(sut.sample(), PlayerSample(position: 0, duration: nil))
     }
 
-    func testCurrentTimeIsZeroForBarePlayer() {
-        let sut = AVPlayerVideoPlayer(AVPlayer())
-        XCTAssertEqual(sut.currentTime, 0)
-    }
-
-    func testStartThenStopObservingDoesNotCrash() {
-        let sut = AVPlayerVideoPlayer(AVPlayer())
+    func testSampleIsNilAfterThePlayerIsReleased() {
+        var player: AVPlayer? = AVPlayer()
+        let sut = AVPlayerAdapter(player!)
         sut.startObserving()
+        player = nil
+        XCTAssertNil(sut.sample(), "a session must notice its player is gone while still observing")
         sut.stopObserving()
     }
 
+    func testStartThenStopObservingDoesNotCrash() {
+        let player = AVPlayer()
+        let sut = AVPlayerAdapter(player)
+        withExtendedLifetime(player) {
+            sut.startObserving()
+            sut.stopObserving()
+        }
+    }
+
     func testStopObservingWithoutStartIsSafe() {
-        let sut = AVPlayerVideoPlayer(AVPlayer())
+        let sut = AVPlayerAdapter(AVPlayer())
         sut.stopObserving()
     }
 
     func testDoubleStartThenSingleStopIsSafe() {
-        let sut = AVPlayerVideoPlayer(AVPlayer())
-        sut.startObserving()
-        sut.startObserving()
-        sut.stopObserving()
+        let player = AVPlayer()
+        let sut = AVPlayerAdapter(player)
+        withExtendedLifetime(player) {
+            sut.startObserving()
+            sut.startObserving()
+            sut.stopObserving()
+        }
     }
 
     func testDeinitAfterStartObservingDoesNotCrash() {
-        var sut: AVPlayerVideoPlayer? = AVPlayerVideoPlayer(AVPlayer())
-        sut?.startObserving()
-        sut = nil
+        let player = AVPlayer()
+        var sut: AVPlayerAdapter? = AVPlayerAdapter(player)
+        withExtendedLifetime(player) {
+            sut?.startObserving()
+            sut = nil
+        }
     }
 
     func testDeinitWithoutStartObservingDoesNotCrash() {
-        var sut: AVPlayerVideoPlayer? = AVPlayerVideoPlayer(AVPlayer())
+        var sut: AVPlayerAdapter? = AVPlayerAdapter(AVPlayer())
         XCTAssertNotNil(sut)
         sut = nil
     }
 
-    func testOnEventIsSettableAndClearedSafelyOnTeardown() {
+    func testWaitingEmitsNothingAndPausedEmitsPaused() {
         let player = AVPlayer()
-        let sut = AVPlayerVideoPlayer(player)
-        var receivedEvents: [VideoPlayerEvent] = []
-        sut.onEvent = { receivedEvents.append($0) }
+        let sut = AVPlayerAdapter(player)
+        var received: [PlayerEvent] = []
+        sut.onEvent = { received.append($0) }
         sut.startObserving()
 
-        // A bare player with no item transitions to `.waitingToPlayAtSpecifiedRate` on `play()`,
-        // so this proves `onEvent` is actually wired up (not just settable) before teardown.
+        // A bare player with no item goes to `.waitingToPlayAtSpecifiedRate` on `play()`.
         player.play()
-        XCTAssertEqual(receivedEvents, [.buffering])
+        XCTAssertEqual(received, [])
+        player.pause()
+        XCTAssertEqual(received, [.paused])
 
         sut.stopObserving()
         sut.onEvent = nil
-
-        // No further events after teardown, even though `play()` already changed player state.
-        player.pause()
-        XCTAssertEqual(receivedEvents, [.buffering])
+        player.play()
+        XCTAssertEqual(received, [.paused], "nothing after teardown")
     }
 
-    /// Regression test: when the player has no `currentItem` at `startObserving()` time, this
-    /// instance must not register `object: nil` notification observers — otherwise it would react
-    /// to `.AVPlayerItemDidPlayToEndTime` / `.AVPlayerItemTimeJumped` notifications posted by any
-    /// unrelated `AVPlayerItem` elsewhere in the process.
-    func testDoesNotReactToUnrelatedPlayerItemNotifications() {
-        let sut = AVPlayerVideoPlayer(AVPlayer()) // no currentItem
-        var receivedEvents: [VideoPlayerEvent] = []
-        sut.onEvent = { receivedEvents.append($0) }
+    // Regression: `onEvent` is written by the SDK's queue while AVFoundation delivers events on its
+    // own threads. Meaningful under `--sanitize=thread`; unsanitized it only catches a crash.
+    func testOnEventCanBeReplacedWhileEventsAreDelivered() {
+        let player = AVPlayer()
+        let sut = AVPlayerAdapter(player)
+        let received = LockedCounter()
+        sut.onEvent = { _ in received.increment() }
         sut.startObserving()
 
-        // A plain, unrelated object standing in for "some other AVPlayerItem elsewhere in the
-        // process" — NotificationCenter matches by object identity, not type, so this is
-        // sufficient to prove `sut` isn't registered with `object: nil` without touching any
-        // real media.
-        let unrelatedObject = NSObject()
-        NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: unrelatedObject)
-        NotificationCenter.default.post(name: .AVPlayerItemTimeJumped, object: unrelatedObject)
+        let replaced = expectation(description: "handler replaced repeatedly")
+        DispatchQueue.global().async {
+            for _ in 0..<500 {
+                sut.onEvent = { _ in received.increment() }
+            }
+            replaced.fulfill()
+        }
+        for _ in 0..<500 {
+            player.play()
+            player.pause()
+        }
+        wait(for: [replaced], timeout: 10)
 
-        XCTAssertTrue(receivedEvents.isEmpty)
         sut.stopObserving()
+        sut.onEvent = nil
+        XCTAssertGreaterThan(received.value, 0, "the pauses must have reached some handler")
+    }
+
+    // Regression: must not register `object: nil` notification observers, or it would react to
+    // notifications posted by any unrelated `AVPlayerItem` elsewhere in the process.
+    func testDoesNotReactToUnrelatedPlayerItemNotifications() {
+        let player = AVPlayer() // no currentItem
+        let sut = AVPlayerAdapter(player)
+        var receivedEvents: [PlayerEvent] = []
+        sut.onEvent = { receivedEvents.append($0) }
+        withExtendedLifetime(player) {
+            sut.startObserving()
+
+            let unrelatedObject = NSObject()
+            NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: unrelatedObject)
+            NotificationCenter.default.post(name: .AVPlayerItemTimeJumped, object: unrelatedObject)
+
+            XCTAssertTrue(receivedEvents.isEmpty)
+            sut.stopObserving()
+        }
+    }
+}
+
+private final class LockedCounter {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int { lock.withLock { count } }
+
+    func increment() {
+        lock.withLock { count += 1 }
     }
 }
