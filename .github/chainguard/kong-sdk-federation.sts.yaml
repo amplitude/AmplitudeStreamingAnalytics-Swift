@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/octo-sts/app/refs/heads/main/pkg/octosts/octosts.TrustPolicy.json
+#
+# Consumer: amplitude/kong, workflow .github/workflows/sdk-federation.yml, job fetch-sdk.
+# That job runs on an Ops-connected runner, exchanges its OIDC identity here, and clones
+# this repository read-only so the Swift bridge can be built on a GitHub-hosted macOS runner.
+# Read-only: grants contents:read and nothing else.
+
+issuer: https://token.actions.githubusercontent.com
+subject: repo:amplitude@2291562/kong@1352947268:ref:refs/heads/main
+audience: octo-sts.ops.amplitude.com
+
+claim_pattern:
+  workflow_ref: '^amplitude/kong/\.github/workflows/sdk-federation\.yml@refs/heads/main$'
+
+permissions:
+  contents: read
