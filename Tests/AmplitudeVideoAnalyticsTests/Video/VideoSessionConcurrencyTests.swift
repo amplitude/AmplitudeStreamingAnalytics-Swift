@@ -177,7 +177,9 @@ final class VideoSessionConcurrencyTests: XCTestCase {
         }
         let emittedBeforeDrop = harness!.emitted.count
         let finalizedBeforeDrop = harness!.finalizedCount
-        weak let weakSession = harness!.session
+        // Assigned separately: `weak let` is rejected before Swift 6.2.
+        weak var weakSession: VideoSession?
+        weakSession = harness!.session
 
         harness = nil
 
