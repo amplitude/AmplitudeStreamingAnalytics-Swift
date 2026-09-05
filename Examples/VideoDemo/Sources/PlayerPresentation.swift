@@ -1,9 +1,11 @@
 import AVKit
 
-/// Shared demo content: Apple's public HLS test stream, used by both the
-/// SwiftUI and UIKit playback screens.
+/// Shared demo content: Apple's classic BipBop HLS test stream (H.264/AAC in
+/// MPEG-TS), used by both the SwiftUI and UIKit playback screens. Chosen for
+/// broad simulator compatibility; the advanced fMP4 variant fails to decode on
+/// many simulators.
 enum DemoVideo {
-    static let url = URL(string: "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8")
+    static let url = URL(string: "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8")
 
     /// The demo URL is a fixed, known-good literal, so force-unwrapping here
     /// is intentional rather than user/network input.

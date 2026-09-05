@@ -15,8 +15,8 @@ struct SwiftUIPlayerScreen: View {
                 analytics.plugin.trackVideo(
                     player: player,
                     options: VideoTrackingOptions(
-                        contentId: "bipbop-adv-fmp4",
-                        title: "BipBop Advanced (SwiftUI)",
+                        contentId: "bipbop-4x3",
+                        title: "BipBop (SwiftUI)",
                         deliveryMode: .onDemand
                     )
                 )

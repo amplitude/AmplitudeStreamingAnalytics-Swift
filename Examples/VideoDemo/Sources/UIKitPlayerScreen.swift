@@ -81,8 +81,8 @@ final class UIKitPlayerViewController: UIViewController {
         plugin?.trackVideo(
             player: player,
             options: VideoTrackingOptions(
-                contentId: "bipbop-adv-fmp4",
-                title: "BipBop Advanced (UIKit)",
+                contentId: "bipbop-4x3",
+                title: "BipBop (UIKit)",
                 deliveryMode: .onDemand
             )
         )
