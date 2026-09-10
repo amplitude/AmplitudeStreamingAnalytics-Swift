@@ -58,6 +58,11 @@ final class DelayedEventTracker {
         }
     }
 
+    /// Sends the live set now instead of at the next pulse. Used at backgrounding.
+    func pulseNow() {
+        queue.async { self.setNeedsSend() }
+    }
+
     func flush() {
         queue.async {
             // The pulse would re-upsert the row this request has the server delete.
