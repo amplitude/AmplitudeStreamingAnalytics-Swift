@@ -2,28 +2,22 @@ import AVFoundation
 import Foundation
 import ObjectiveC
 
-/// `Player` over an `AVPlayer`, held weakly so the session ends when the app's player goes away.
-/// AVPlayer has no seek-start signal, so seeks are read off the playhead: a jump two callbacks could not
-/// have carried starts one, the next ordinary advance ends it.
-/// The player's deallocation is reported as `.released` through an associated object whose `deinit` runs with it.
+/// `Player` over an `AVPlayer`, held weakly so the session ends when the app's player goes away. Seeks come from
+/// `AVPlayerItemTimeJumped`, which fires only after the playhead moves, so `.seeked` is sent and `.seeking` is
+/// not — under-reporting watch time by about half the SDK's playhead polling interval per seek. Bound to the
+/// item present when observation starts: `replaceCurrentItem` is not followed, so stop and re-track around it.
 final class AVPlayerAdapter: Player {
     private weak var player: AVPlayer?
-    // Guarded by `lock`: written from the SDK queue, read from AVFoundation's threads and the
-    // releasing thread via `emit`.
-    private var isObserving = false
-    private let queue = DispatchQueue(label: "com.amplitude.avPlayerAdapter")
+    private var lastKnown = Playhead(position: 0, duration: nil)
+    private var sentinelKey: UnsafeMutableRawPointer?
+    // Guards `onEvent` alone: read on AVFoundation's threads, written as the SDK tears down on its own.
     private let lock = NSLock()
-    private var position: TimeInterval = 0
-    private var isSeeking = false
-    private var lastDuration: TimeInterval?
-    private var timeObserver: Any?
-    private static let pollInterval: TimeInterval = 0.25
 
     private var timeControlStatusObserver: TimeControlStatusObserver?
     private var itemStatusToken: NSKeyValueObservation?
     private var didPlayToEndObserver: NSObjectProtocol?
+    private var timeJumpedObserver: NSObjectProtocol?
 
-    // Written once per `startObserving`, before any observer exists; read on AVFoundation's threads.
     private var onEvent: ((PlayerEvent) -> Void)?
 
     init(_ player: AVPlayer) {
@@ -34,39 +28,20 @@ final class AVPlayerAdapter: Player {
         stopObserving()
     }
 
-    // Guards against the sentinel deallocating synchronously inside `stopObserving()` (clearing the
-    // associated object drops its last reference) and reporting `.released` for a player that is still alive.
+    // Snapshot under the lock, call outside it: the lock is not recursive and the callback is the SDK's.
     private func emit(_ event: PlayerEvent) {
         lock.lock()
-        let observing = isObserving
+        let onEvent = self.onEvent
         lock.unlock()
-        guard observing else { return }
         onEvent?(event)
     }
 
     func playhead() -> Playhead {
-        let liveDuration = player.map { duration(of: $0.currentItem) }
-        lock.lock()
-        defer { lock.unlock() }
-        if let liveDuration { lastDuration = liveDuration }
-        return Playhead(position: position, duration: lastDuration)
-    }
-
-    private func playheadMoved(to time: CMTime) {
-        let seconds = time.seconds
-        guard seconds.isFinite else { return }
-        lock.lock()
-        let isJump = abs(seconds - position) > Self.pollInterval * 2 + 0.05
-        let edge: PlayerEvent?
-        switch (isJump, isSeeking) {
-        case (true, false): edge = .seekStarted
-        case (false, true): edge = .seekEnded
-        default: edge = nil
-        }
-        isSeeking = isJump
-        position = seconds
-        lock.unlock()
-        if let edge { emit(edge) }
+        guard let player else { return lastKnown }
+        let seconds = player.currentTime().seconds
+        lastKnown = Playhead(position: seconds.isFinite ? seconds : lastKnown.position,
+                             duration: duration(of: player.currentItem))
+        return lastKnown
     }
 
     private func duration(of item: AVPlayerItem?) -> TimeInterval? {
@@ -77,24 +52,12 @@ final class AVPlayerAdapter: Player {
 
     func startObserving(onEvent: @escaping (PlayerEvent) -> Void) {
         lock.lock()
-        let wasObserving = isObserving
-        isObserving = true
+        let wasObserving = self.onEvent != nil
+        if !wasObserving { self.onEvent = onEvent }
         lock.unlock()
         guard !wasObserving else { return }
-        self.onEvent = onEvent
-        guard let player else { return onEvent(.released) }
-        let sentinel = ReleaseSentinel { [weak self] in self?.emit(.released) }
-        objc_setAssociatedObject(player, Unmanaged.passUnretained(self).toOpaque(), sentinel, .OBJC_ASSOCIATION_RETAIN)
-
-        let seconds = player.currentTime().seconds
-        lock.lock()
-        position = seconds.isFinite ? seconds : 0
-        isSeeking = false
-        lock.unlock()
-        let observerInterval = CMTime(seconds: Self.pollInterval, preferredTimescale: 600)
-        timeObserver = player.addPeriodicTimeObserver(forInterval: observerInterval, queue: queue) { [weak self] time in
-            self?.playheadMoved(to: time)
-        }
+        guard let player else { return emit(.released) }
+        sentinelKey = ReleaseSentinel.attach(to: player) { [weak self] in self?.emit(.released) }
 
         timeControlStatusObserver = TimeControlStatusObserver(player: player) { [weak self] status in
             self?.handle(status)
@@ -110,33 +73,35 @@ final class AVPlayerAdapter: Player {
             didPlayToEndObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: nil
             ) { [weak self] _ in self?.emit(.ended) }
+            timeJumpedObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemTimeJumped, object: item, queue: nil
+            ) { [weak self] _ in self?.emit(.seeked) }
         }
 
         // `.new`-only KVO never reports a player that was already playing.
         if player.timeControlStatus == .playing {
-            onEvent(.played)
+            emit(.played)
         }
     }
 
     func stopObserving() {
         lock.lock()
-        isObserving = false
+        onEvent = nil
         lock.unlock()
-        // Must run unlocked: clearing the associated object deallocates the sentinel synchronously,
-        // and its `deinit` calls `emit`, which takes `lock` — `NSLock` is not recursive.
-        if let player {
-            objc_setAssociatedObject(player, Unmanaged.passUnretained(self).toOpaque(), nil, .OBJC_ASSOCIATION_RETAIN)
-        }
-        if let timeObserver {
-            player?.removeTimeObserver(timeObserver)
-            self.timeObserver = nil
-        }
+        // Unlocked from here: registering `.initial` KVO and posting a notification both reach `emit`
+        // synchronously, and the lock is not recursive. The `if let` pins the player against a concurrent release.
+        if let player, let sentinelKey { ReleaseSentinel.detach(from: player, key: sentinelKey) }
+        sentinelKey = nil
         timeControlStatusObserver?.invalidate()
         timeControlStatusObserver = nil
         itemStatusToken = nil
         if let didPlayToEndObserver {
             NotificationCenter.default.removeObserver(didPlayToEndObserver)
             self.didPlayToEndObserver = nil
+        }
+        if let timeJumpedObserver {
+            NotificationCenter.default.removeObserver(timeJumpedObserver)
+            self.timeJumpedObserver = nil
         }
     }
 
@@ -154,8 +119,8 @@ final class AVPlayerAdapter: Player {
     }
 }
 
-// Classic KVO: block-based gives `change.newValue == nil` for `@objc` enums, leaving only the live
-// property, which under concurrent transitions is a newer status than the one that fired.
+// Classic KVO: block-based gives `change.newValue == nil` for `@objc` enums, leaving only the live property,
+// which under concurrent transitions is newer than the status that fired.
 private final class TimeControlStatusObserver: NSObject {
     private static let keyPath = #keyPath(AVPlayer.timeControlStatus)
 
@@ -193,9 +158,24 @@ private final class TimeControlStatusObserver: NSObject {
     }
 }
 
-/// Retained by the player; its `deinit` is the player's deallocation.
+/// Owns its own attachment: the player retains it, so its `deinit` is the player's deallocation.
 private final class ReleaseSentinel {
-    private let onRelease: () -> Void
-    init(onRelease: @escaping () -> Void) { self.onRelease = onRelease }
-    deinit { onRelease() }
+    private var onRelease: (() -> Void)?
+    private init(_ onRelease: @escaping () -> Void) { self.onRelease = onRelease }
+
+    /// Keyed by the sentinel's own address, so two adapters on one player can never clear each other's.
+    static func attach(to player: AVPlayer, onRelease: @escaping () -> Void) -> UnsafeMutableRawPointer {
+        let sentinel = ReleaseSentinel(onRelease)
+        let key = Unmanaged.passUnretained(sentinel).toOpaque()
+        objc_setAssociatedObject(player, key, sentinel, .OBJC_ASSOCIATION_RETAIN)
+        return key
+    }
+
+    /// Disarms first: clearing the association runs `deinit` at once, reporting a release for a live player.
+    static func detach(from player: AVPlayer, key: UnsafeMutableRawPointer) {
+        (objc_getAssociatedObject(player, key) as? ReleaseSentinel)?.onRelease = nil
+        objc_setAssociatedObject(player, key, nil, .OBJC_ASSOCIATION_RETAIN)
+    }
+
+    deinit { onRelease?() }
 }

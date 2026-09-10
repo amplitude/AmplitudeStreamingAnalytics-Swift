@@ -1,49 +1,46 @@
 import Foundation
 
-/// Where the playhead is. `duration` is nil when the content has no known length — a live stream, or an item whose
-/// length has not loaded yet. Unless the app sets `VideoTrackingOptions.deliveryMode`, `delivery_mode` is derived
-/// from it: nil reports `live`, a value reports `on_demand`.
+/// Where the playhead is. `duration` is nil when the length is unknown — a live stream, or an item that has
+/// not loaded it yet.
 struct Playhead: Equatable {
     let position: TimeInterval
     let duration: TimeInterval?
 }
 
-/// What a player reports. Duplicate and out-of-order events are tolerated: the SDK acts on transitions and drops
-/// the rest.
+/// What a player reports. Send each as it happens; order does not matter and repeats are free.
 enum PlayerEvent: Equatable {
-    /// Playback is running. Ignored while a play is already open.
+    /// Playback started or resumed.
     case played
-    /// Playback is not running. Ignored when no play is open.
+    /// Playback stopped without reaching the end. Not for buffering.
     case paused
-    /// The playhead began moving to a new position. Nothing counts as watch time until `.seekEnded`;
-    /// `.played`, `.paused` and `.ended` also close a pending seek.
-    case seekStarted
-    /// The playhead settled at its new position. The SDK reads it and resumes counting.
-    case seekEnded
-    /// Played to the end. A later `.played` is a replay with a fresh `play_id`.
+    /// Optional: a seek is coming and the playhead has not moved yet. Sending it makes watch time exact.
+    case seeking
+    /// The playhead moved by something other than playing. Required if your player can seek, or the SDK
+    /// counts the jump as watched.
+    case seeked
+    /// Playback reached the end. A later `.played` is a new play.
     case ended
-    /// Playback failed. Ends the viewing only while playing; otherwise it is logged and ignored.
+    /// Playback failed.
     case error(message: String?)
-    /// The player went away. Ends the viewing; the SDK reads the playhead once more and expects the last known values.
+    /// The player is gone and will report nothing more; this ends the viewing. Hold your player weakly and
+    /// send it as soon as the player deallocates.
     case released
 }
 
-/// What the SDK observes to track one viewing: report what your player does, and answer where the playhead is.
-/// The SDK computes watch time. `AVPlayerAdapter` is the built-in implementation.
+/// Reports one player to the SDK: you say what it does and where its playhead is, the SDK works out how much
+/// was watched. It counts playhead movement rather than elapsed time, so a stall costs nothing but a jump you
+/// do not report is counted as watched. `AVPlayerAdapter` is the built-in conformer for `AVPlayer`.
 ///
-/// Threading: `playhead()`, `startObserving()` and `stopObserving()` are only ever called from one serial queue,
-/// never concurrently, so an implementation needs no locking for them. `onEvent` may fire on any thread, including
-/// synchronously from inside `startObserving()`; the SDK hops onto its own queue and never calls back into the
-/// player from inside the callback.
-///
-/// Readings: `playhead()` is polled about once a second while playing and after every event. A non-finite or
-/// negative position or duration is replaced with the last good reading rather than trusted. After `.released` it
-/// answers the last known reading.
-///
-/// Send `.released` when your player is deallocated or otherwise finished for good; `AVPlayerAdapter` does this
-/// from the player's deallocation.
+/// The SDK calls the three methods below from one queue, one at a time: they need no locking against each other.
 protocol Player: AnyObject {
+    /// Where the playhead is now, read from the player and remembered. Once the player is gone, answer with
+    /// the last reading — a call can already be under way when it dies.
     func playhead() -> Playhead
+
+    /// Called once by the SDK to start tracking: attach, keep `onEvent`, and call it from any thread,
+    /// including before this returns. The SDK never calls back into you from inside it.
     func startObserving(onEvent: @escaping (PlayerEvent) -> Void)
+
+    /// Called by the SDK when the viewing ends, possibly twice or without ever starting. Detach everything.
     func stopObserving()
 }

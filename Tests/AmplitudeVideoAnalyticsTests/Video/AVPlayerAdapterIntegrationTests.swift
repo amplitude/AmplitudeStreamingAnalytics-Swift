@@ -8,8 +8,8 @@ import XCTest
 // Scope: unlike `AVPlayerAdapterTests` (bare AVPlayer), this drives a REAL `AVPlayer` against a
 // REAL, locally-generated H.264 asset to prove the adapter emits `PlayerEvent`s end-to-end.
 final class AVPlayerAdapterIntegrationTests: XCTestCase {
-    /// 60 frames @ 10fps = 6.0s. Matches the asset generated in `makeSilentVideoAsset()`; long enough that a
-    /// seek far ahead, and the settle that follows it, are both observable.
+    /// 60 frames @ 10fps = 6.0s. Matches the asset generated in `makeSilentVideoAsset()`; long enough to seek
+    /// far ahead and still have playback left to observe.
     private static let assetDurationSeconds = 6.0
 
     /// Generated once for the whole class, not per test: H.264 encoding is software-only and slow
@@ -67,8 +67,6 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         }
         player.pause()
 
-        // The adapter's own position comes from its 250ms periodic observer, not the player's; on a
-        // slow simulator that first tick may not have landed yet, so poll instead of reading once.
         waitForPlayheadPastSUT(sut, threshold: 0, timeout: 2)
     }
 
@@ -100,24 +98,86 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         wait(for: [paused], timeout: 10)
     }
 
-    func testSeekFarAheadWhilePlayingYieldsSeekStartedThenSeekEnded() {
+    func testSeekWhilePlayingYieldsExactlyOneSeeked() {
         let player = AVPlayer(url: assetURL)
         let sut = AVPlayerAdapter(player)
         waitForItemReady(player)
 
         let seekEvents = EventRecorder()
-        let seekEnded = expectation(description: "seekEnded")
+        let seeked = expectation(description: "seeked")
         sut.startObserving { event in
-            if event == .seekStarted || event == .seekEnded { seekEvents.record(event) }
-            if event == .seekEnded { seekEnded.fulfill() }
+            if event == .seeking || event == .seeked { seekEvents.record(event) }
+            if event == .seeked { seeked.fulfill() }
         }
         addTeardownBlock { sut.stopObserving() }
 
         player.play()
         seekPrecisely(player, to: 4)
 
-        wait(for: [seekEnded], timeout: 10)
-        XCTAssertEqual(seekEvents.events, [.seekStarted, .seekEnded])
+        wait(for: [seeked], timeout: 10)
+        // AVPlayer reports only the settle, so the adapter never produces `.seeking`.
+        XCTAssertEqual(seekEvents.events, [.seeked])
+    }
+
+    /// The reason `AVPlayerItemTimeJumped` is used instead of polling the playhead: a seek this small is
+    /// below any practical polling threshold, and polling books it as ordinary watch time.
+    func testSeekTooSmallForPollingIsStillReported() {
+        let player = AVPlayer(url: assetURL)
+        let sut = AVPlayerAdapter(player)
+        waitForItemReady(player)
+
+        let seeked = expectation(description: "seeked for a 0.05s seek")
+        sut.startObserving { if $0 == .seeked { seeked.fulfill() } }
+        addTeardownBlock { sut.stopObserving() }
+
+        player.play()
+        waitForPlayhead(player, toReach: 0.5)
+        seekPrecisely(player, to: player.currentTime().seconds + 0.05)
+
+        wait(for: [seeked], timeout: 10)
+    }
+
+    /// Also unreachable by polling: while paused the playhead never moves, so there is nothing to sample.
+    func testSeekWhilePausedIsReported() {
+        let player = AVPlayer(url: assetURL)
+        let sut = AVPlayerAdapter(player)
+        waitForItemReady(player)
+
+        let seeked = expectation(description: "seeked while paused")
+        sut.startObserving { if $0 == .seeked { seeked.fulfill() } }
+        addTeardownBlock { sut.stopObserving() }
+
+        seekPrecisely(player, to: 3)
+        wait(for: [seeked], timeout: 10)
+    }
+
+    /// Known and accepted: reaching the end is a time jump too. The SDK reconciles it — `.ended` closes the play
+    /// and clears the seek. Asserted so the behaviour is not mistaken for a regression.
+    func testReachingTheEndAlsoReportsSeeked() {
+        let player = AVPlayer(url: assetURL)
+        let sut = AVPlayerAdapter(player)
+        waitForItemReady(player)
+
+        // Positioned near the end BEFORE observing, so the only jump the adapter can see is the end itself.
+        // Waits on the seek's own completion, not on a periodic observer: the player is paused here, so
+        // nothing else guarantees a callback once the seek lands.
+        let settled = expectation(description: "seek near the end settled")
+        player.seek(to: CMTime(seconds: Self.assetDurationSeconds - 0.5, preferredTimescale: 600),
+                    toleranceBefore: .zero, toleranceAfter: .zero) { _ in settled.fulfill() }
+        wait(for: [settled], timeout: 10)
+
+        let seeked = expectation(description: "seeked at play-to-end")
+        seeked.assertForOverFulfill = false
+        let ended = expectation(description: "ended")
+        ended.assertForOverFulfill = false
+        sut.startObserving { event in
+            if event == .seeked { seeked.fulfill() }
+            if event == .ended { ended.fulfill() }
+        }
+        addTeardownBlock { sut.stopObserving() }
+
+        player.play()
+        wait(for: [seeked, ended], timeout: 15)
     }
 
     func testPlayAfterPauseYieldsNoSeekEvents() {
@@ -129,7 +189,7 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         let paused = expectation(description: "paused")
         paused.assertForOverFulfill = false
         sut.startObserving { event in
-            if event == .seekStarted || event == .seekEnded { seekEvents.record(event) }
+            if event == .seeking || event == .seeked { seekEvents.record(event) }
             if event == .paused { paused.fulfill() }
         }
         addTeardownBlock { sut.stopObserving() }
@@ -150,15 +210,16 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         let sut = AVPlayerAdapter(player)
         waitForItemReady(player)
 
-        let seekEnded = expectation(description: "seekEnded")
-        sut.startObserving { if $0 == .seekEnded { seekEnded.fulfill() } }
+        let seeked = expectation(description: "seeked")
+        seeked.assertForOverFulfill = false
+        sut.startObserving { if $0 == .seeked { seeked.fulfill() } }
         addTeardownBlock { sut.stopObserving() }
 
         player.play()
         let target: TimeInterval = 3
         seekPrecisely(player, to: target)
 
-        wait(for: [seekEnded], timeout: 10)
+        wait(for: [seeked], timeout: 10)
         XCTAssertEqual(sut.playhead().position, target, accuracy: 0.3)
     }
 
@@ -282,13 +343,9 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         if let token { player.removeTimeObserver(token) }
     }
 
-    /// Polls the adapter's own `playhead()` rather than the player directly: the adapter's periodic
-    /// observer only updates `position` every `pollInterval`, so a threshold read straight off the
-    /// player can cross it before the adapter's own reading has caught up.
     /// Polls from a repeating timer, like `waitForPlayhead`, rather than `Thread.sleep`-ing the test's
     /// main thread: on the simulator, AVPlayer needs its main run loop pumped to actually start playback,
-    /// and a busy-wait that never yields to the run loop starves it, so the adapter's cached position
-    /// never moves.
+    /// and a busy-wait that never yields to the run loop starves it, so the playhead never moves.
     private func waitForPlayheadPastSUT(_ adapter: AVPlayerAdapter, threshold: TimeInterval, timeout: TimeInterval = 10) {
         let reached = expectation(description: "adapter playhead advanced past \(threshold)")
         reached.assertForOverFulfill = false
