@@ -458,6 +458,20 @@ final class DelayedEventTrackerTests: XCTestCase {
         expectNoUpload(beyond: 1)
     }
 
+    // MARK: - pulseNow
+
+    /// pulseNow sends the live set immediately, without waiting for the (here, very distant) pulse.
+    func testPulseNowSendsTheLiveDelayedEventWithoutWaitingForThePulse() {
+        let tracker = makeTracker(pulseInterval: 3_600)
+        tracker.track(makeDelayed("a", forcePulse: false))
+        expectNoUpload(beyond: 0)
+
+        tracker.pulseNow()
+        waitForUploads(1)
+        XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["a"])
+        expectNoUpload(beyond: 1)
+    }
+
     // MARK: - discard / empty state
 
     func testDiscardClearsStateAndSendsNothing() {

@@ -153,6 +153,23 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertEqual(uploader.bodies[1].ttlMs, 0)
     }
 
+    /// `pulseNow()` must ride the same host timeline as `track`, or a fresh event tracked right
+    /// before it can lose the race and miss the pulse it asked for.
+    func testPulseNowIsOrderedAfterTheEventsTrackedBeforeIt() {
+        let spy = SpyEnrichmentPlugin()
+        makeFacade(enrichment: spy, configuration: DelayedEventsConfiguration(pulseInterval: 3_600))
+
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed))
+        delayedEvents.pulseNow()
+        waitForUploads(1)
+
+        XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["ins-1"])
+        XCTAssertFalse(spy.seen.contains("$delayed_pulse"), "the marker must not reach the host uploader")
+        // "session_start"/"session_end": Amplitude-Swift's Constants.AMP_SESSION_START_EVENT/AMP_SESSION_END_EVENT, internal to that module.
+        XCTAssertFalse(spy.seen.contains("session_start"), "the marker must not fabricate a session")
+        XCTAssertFalse(spy.seen.contains("session_end"), "the marker must not fabricate a session")
+    }
+
     func testFacadeDiscardRotatesTheDelayId() {
         makeFacade()
         delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed), forcePulse: true)
