@@ -5,19 +5,91 @@ import XCTest
 
 // Scope: bare AVPlayer only (no item, no media); playback-driven events are covered by the integration tests.
 final class AVPlayerAdapterTests: XCTestCase {
-    func testSampleOfBarePlayerIsZeroPositionAndNilDuration() {
+    func testPlayheadOfBarePlayerIsZeroPositionAndNilDuration() {
         let player = AVPlayer()
         let sut = AVPlayerAdapter(player)
-        XCTAssertEqual(sut.sample(), PlayerSample(position: 0, duration: nil))
+        XCTAssertEqual(sut.playhead(), Playhead(position: 0, duration: nil))
     }
 
-    func testSampleIsNilAfterThePlayerIsReleased() {
-        var player: AVPlayer? = AVPlayer()
-        let sut = AVPlayerAdapter(player!)
-        sut.startObserving { _ in }
-        player = nil
-        XCTAssertNil(sut.sample(), "a session must notice its player is gone while still observing")
+    func testReleasingThePlayerEmitsReleased() {
+        let events = EventRecorder()
+        let released = expectation(description: "released")
+        // The pool drains the references AVFoundation autoreleased while the player was being set up.
+        let sut = autoreleasepool { () -> AVPlayerAdapter in
+            var player: AVPlayer? = AVPlayer()
+            let adapter = AVPlayerAdapter(player!)
+            adapter.startObserving { event in
+                events.record(event)
+                if event == .released { released.fulfill() }
+            }
+            player = nil
+            return adapter
+        }
+
+        wait(for: [released], timeout: 2)
+        XCTAssertEqual(events.events, [.released])
+        XCTAssertEqual(sut.playhead(), Playhead(position: 0, duration: nil))
         sut.stopObserving()
+    }
+
+    func testStopObservingBeforeReleaseEmitsNothing() {
+        let events = EventRecorder()
+        let unexpectedEvent = expectation(description: "no events after stopObserving before release")
+        unexpectedEvent.isInverted = true
+        autoreleasepool {
+            var player: AVPlayer? = AVPlayer()
+            let adapter = AVPlayerAdapter(player!)
+            adapter.startObserving { event in
+                events.record(event)
+                unexpectedEvent.fulfill()
+            }
+            adapter.stopObserving()
+            player = nil
+        }
+
+        wait(for: [unexpectedEvent], timeout: 0.3)
+        XCTAssertTrue(events.events.isEmpty)
+    }
+
+    func testTwoAdaptersOnOnePlayerDoNotCrossFireReleased() {
+        let player = AVPlayer()
+        let firstEvents = EventRecorder()
+        let firstReleased = expectation(description: "first adapter fires .released")
+        firstReleased.isInverted = true
+        let first = AVPlayerAdapter(player)
+        let second = AVPlayerAdapter(player)
+        withExtendedLifetime(player) {
+            first.startObserving { event in
+                firstEvents.record(event)
+                if event == .released { firstReleased.fulfill() }
+            }
+            second.startObserving { _ in }
+            second.stopObserving()
+        }
+
+        wait(for: [firstReleased], timeout: 0.3)
+        XCTAssertTrue(firstEvents.events.isEmpty)
+        first.stopObserving()
+    }
+
+    func testStartObservingOnAReleasedPlayerReportsReleased() {
+        let events = EventRecorder()
+        let sut = autoreleasepool { () -> AVPlayerAdapter in
+            var player: AVPlayer? = AVPlayer()
+            let adapter = AVPlayerAdapter(player!)
+            player = nil
+            return adapter
+        }
+
+        // AVFoundation completes a player's last release asynchronously, so the weak reference can
+        // still be alive when `startObserving` runs; `.released` may only arrive afterward.
+        let released = expectation(description: "released")
+        sut.startObserving { event in
+            events.record(event)
+            if event == .released { released.fulfill() }
+        }
+        wait(for: [released], timeout: 2)
+        XCTAssertEqual(events.events, [.released])
     }
 
     func testStartThenStopObservingDoesNotCrash() {
@@ -87,10 +159,17 @@ final class AVPlayerAdapterTests: XCTestCase {
 
             let unrelatedObject = NSObject()
             NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: unrelatedObject)
-            NotificationCenter.default.post(name: .AVPlayerItemTimeJumped, object: unrelatedObject)
 
             XCTAssertTrue(receivedEvents.isEmpty)
             sut.stopObserving()
         }
     }
+}
+
+/// Events are emitted from the adapter's queue or the releasing thread but read back from the test thread.
+private final class EventRecorder {
+    private let lock = NSLock()
+    private var recorded: [PlayerEvent] = []
+    func record(_ event: PlayerEvent) { lock.withLock { recorded.append(event) } }
+    var events: [PlayerEvent] { lock.withLock { recorded } }
 }

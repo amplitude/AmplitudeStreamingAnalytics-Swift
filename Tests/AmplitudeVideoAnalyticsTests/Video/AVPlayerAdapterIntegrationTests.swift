@@ -8,8 +8,9 @@ import XCTest
 // Scope: unlike `AVPlayerAdapterTests` (bare AVPlayer), this drives a REAL `AVPlayer` against a
 // REAL, locally-generated H.264 asset to prove the adapter emits `PlayerEvent`s end-to-end.
 final class AVPlayerAdapterIntegrationTests: XCTestCase {
-    /// 10 frames @ 10fps = 1.0s. Matches the asset generated in `makeSilentVideoAsset()`.
-    private static let assetDurationSeconds = 1.0
+    /// 60 frames @ 10fps = 6.0s. Matches the asset generated in `makeSilentVideoAsset()`; long enough that a
+    /// seek far ahead, and the settle that follows it, are both observable.
+    private static let assetDurationSeconds = 6.0
 
     /// Generated once for the whole class, not per test: H.264 encoding is software-only and slow
     /// on the simulators CI runs, and every test only ever reads the file. Regenerating it in each
@@ -44,7 +45,7 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
 
         waitForItemReady(player)
 
-        guard let duration = sut.sample()?.duration else {
+        guard let duration = sut.playhead().duration else {
             return XCTFail("Expected a non-nil duration for a finite local asset")
         }
         XCTAssertEqual(duration, Self.assetDurationSeconds, accuracy: 0.3)
@@ -66,7 +67,9 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         }
         player.pause()
 
-        XCTAssertGreaterThan(sut.sample()?.position ?? 0, 0)
+        // The adapter's own position comes from its 250ms periodic observer, not the player's; on a
+        // slow simulator that first tick may not have landed yet, so poll instead of reading once.
+        waitForPlayheadPastSUT(sut, threshold: 0, timeout: 2)
     }
 
     func testPlayedEventFiresOnPlay() {
@@ -97,22 +100,66 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         wait(for: [paused], timeout: 10)
     }
 
-    func testSeekingEventFiresOnSeek() {
+    func testSeekFarAheadWhilePlayingYieldsSeekStartedThenSeekEnded() {
         let player = AVPlayer(url: assetURL)
         let sut = AVPlayerAdapter(player)
         waitForItemReady(player)
 
-        let seeking = expectation(description: "seeking")
-        // Item setup and the seek itself can each jump the playhead, and `PlayerEvent` tolerates
-        // repeats by contract, so this asserts a seek is reported at all — not exactly once.
-        seeking.assertForOverFulfill = false
-        sut.startObserving { if $0 == .seeking { seeking.fulfill() } }
+        let seekEvents = EventRecorder()
+        let seekEnded = expectation(description: "seekEnded")
+        sut.startObserving { event in
+            if event == .seekStarted || event == .seekEnded { seekEvents.record(event) }
+            if event == .seekEnded { seekEnded.fulfill() }
+        }
         addTeardownBlock { sut.stopObserving() }
 
-        let seekCompleted = expectation(description: "seek completed")
-        player.seek(to: CMTime(value: 5, timescale: 10)) { _ in seekCompleted.fulfill() }
+        player.play()
+        seekPrecisely(player, to: 4)
 
-        wait(for: [seeking, seekCompleted], timeout: 10)
+        wait(for: [seekEnded], timeout: 10)
+        XCTAssertEqual(seekEvents.events, [.seekStarted, .seekEnded])
+    }
+
+    func testPlayAfterPauseYieldsNoSeekEvents() {
+        let player = AVPlayer(url: assetURL)
+        let sut = AVPlayerAdapter(player)
+        waitForItemReady(player)
+
+        let seekEvents = EventRecorder()
+        let paused = expectation(description: "paused")
+        paused.assertForOverFulfill = false
+        sut.startObserving { event in
+            if event == .seekStarted || event == .seekEnded { seekEvents.record(event) }
+            if event == .paused { paused.fulfill() }
+        }
+        addTeardownBlock { sut.stopObserving() }
+
+        player.play()
+        waitForPlayhead(player, toReach: 0.5)
+        player.pause()
+        player.play()
+        waitForPlayhead(player, toReach: 1.0)
+        player.pause()
+        wait(for: [paused], timeout: 10)
+
+        XCTAssertTrue(seekEvents.events.isEmpty, "resuming after a pause must not look like a seek")
+    }
+
+    func testPlayheadPositionAfterSeekIsWithinToleranceOfDestination() {
+        let player = AVPlayer(url: assetURL)
+        let sut = AVPlayerAdapter(player)
+        waitForItemReady(player)
+
+        let seekEnded = expectation(description: "seekEnded")
+        sut.startObserving { if $0 == .seekEnded { seekEnded.fulfill() } }
+        addTeardownBlock { sut.stopObserving() }
+
+        player.play()
+        let target: TimeInterval = 3
+        seekPrecisely(player, to: target)
+
+        wait(for: [seekEnded], timeout: 10)
+        XCTAssertEqual(sut.playhead().position, target, accuracy: 0.3)
     }
 
     func testEndedEventFiresWhenPlaybackCompletes() {
@@ -183,7 +230,74 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         wait(for: [played], timeout: 10)
     }
 
+    func testPlayheadAfterReleaseKeepsTheLastKnownReading() {
+        let released = expectation(description: "released")
+        var before: Playhead?
+        // Scoped in one pool, like `testReleasingThePlayerEmitsReleased`: draining it at the end is
+        // what actually drops the player's last reference and triggers `.released`.
+        let sut = autoreleasepool { () -> AVPlayerAdapter in
+            var player: AVPlayer? = AVPlayer(url: assetURL)
+            let adapter = AVPlayerAdapter(player!)
+            adapter.startObserving { if $0 == .released { released.fulfill() } }
+
+            waitForItemReady(player!)
+            player!.play()
+            waitForPlayheadPastSUT(adapter, threshold: 0.3)
+            before = adapter.playhead()
+
+            player = nil
+            return adapter
+        }
+
+        wait(for: [released], timeout: 10)
+
+        guard let before else {
+            return XCTFail("Expected a playhead reading before release")
+        }
+        XCTAssertGreaterThan(before.position, 0.3)
+        XCTAssertNotNil(before.duration)
+
+        let after = sut.playhead()
+        XCTAssertEqual(after.position, before.position, accuracy: 0.3)
+        XCTAssertEqual(after.duration, before.duration)
+        sut.stopObserving()
+    }
+
     // MARK: - Helpers
+
+    /// Zero tolerance, so the destination is exact rather than the nearest sync sample — needed both to make a
+    /// jump reliably cross the seek-detection threshold and to assert the settled position afterward.
+    private func seekPrecisely(_ player: AVPlayer, to seconds: TimeInterval) {
+        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func waitForPlayhead(_ player: AVPlayer, toReach threshold: TimeInterval) {
+        let reached = expectation(description: "playhead reached \(threshold)")
+        reached.assertForOverFulfill = false
+        var token: Any?
+        token = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { time in
+            if time.seconds >= threshold { reached.fulfill() }
+        }
+        wait(for: [reached], timeout: 10)
+        if let token { player.removeTimeObserver(token) }
+    }
+
+    /// Polls the adapter's own `playhead()` rather than the player directly: the adapter's periodic
+    /// observer only updates `position` every `pollInterval`, so a threshold read straight off the
+    /// player can cross it before the adapter's own reading has caught up.
+    /// Polls from a repeating timer, like `waitForPlayhead`, rather than `Thread.sleep`-ing the test's
+    /// main thread: on the simulator, AVPlayer needs its main run loop pumped to actually start playback,
+    /// and a busy-wait that never yields to the run loop starves it, so the adapter's cached position
+    /// never moves.
+    private func waitForPlayheadPastSUT(_ adapter: AVPlayerAdapter, threshold: TimeInterval, timeout: TimeInterval = 10) {
+        let reached = expectation(description: "adapter playhead advanced past \(threshold)")
+        reached.assertForOverFulfill = false
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { _ in
+            if adapter.playhead().position > threshold { reached.fulfill() }
+        }
+        wait(for: [reached], timeout: timeout)
+        timer.invalidate()
+    }
 
     private func waitForItemReady(_ player: AVPlayer) {
         guard let item = player.currentItem else {
@@ -202,7 +316,7 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         token.invalidate()
     }
 
-    /// Generates a tiny (~1s, 16x16, H.264) silent local video file for deterministic, no-network
+    /// Generates a tiny (~6s, 16x16, H.264) silent local video file for deterministic, no-network
     /// playback in these tests. Runs synchronously in `setUp` via `AVAssetWriter`.
     private static func makeSilentVideoAsset() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
@@ -233,8 +347,8 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         }
         writer.startSession(atSourceTime: .zero)
 
-        let frameCount = 10
-        let frameRate: Int32 = 10 // 10 frames @ 10fps == assetDurationSeconds (1.0s)
+        let frameCount = 60
+        let frameRate: Int32 = 10 // 60 frames @ 10fps == assetDurationSeconds (6.0s)
         for frameNumber in 0..<frameCount {
             // Bounded: an unbounded poll would spin forever if the writer fails, and this runs in
             // setUp rather than under an XCTest expectation, so nothing else would ever time it out.
@@ -297,4 +411,12 @@ private enum IntegrationTestAssetError: Error {
     case writeFailed
     case writerInputNeverReady
     case writerDidNotFinish
+}
+
+/// Events are emitted from the adapter's queue but read back from the test thread.
+private final class EventRecorder {
+    private let lock = NSLock()
+    private var recorded: [PlayerEvent] = []
+    func record(_ event: PlayerEvent) { lock.withLock { recorded.append(event) } }
+    var events: [PlayerEvent] { lock.withLock { recorded } }
 }
