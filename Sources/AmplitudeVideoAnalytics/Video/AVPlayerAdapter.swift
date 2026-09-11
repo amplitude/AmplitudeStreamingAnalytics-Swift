@@ -3,9 +3,8 @@ import Foundation
 import ObjectiveC
 
 /// `Player` over an `AVPlayer`, held weakly so the session ends when the app's player goes away. Seeks come from
-/// `AVPlayerItemTimeJumped`, which fires only after the playhead moves, so `.seeked` is sent and `.seeking` is
-/// not — under-reporting watch time by about half the SDK's playhead polling interval per seek. Bound to the
-/// item present when observation starts: `replaceCurrentItem` is not followed, so stop and re-track around it.
+/// `AVPlayerItemTimeJumped`, which fires only after the playhead moves: `.seeked` is sent, `.seeking` is not, and
+/// watch time runs ~half a poll interval short per seek. `replaceCurrentItem` is not followed — stop and re-track.
 final class AVPlayerAdapter: Player {
     private weak var player: AVPlayer?
     private var lastKnown = Playhead(position: 0, duration: nil)
@@ -30,9 +29,7 @@ final class AVPlayerAdapter: Player {
 
     // Snapshot under the lock, call outside it: the lock is not recursive and the callback is the SDK's.
     private func emit(_ event: PlayerEvent) {
-        lock.lock()
-        let onEvent = self.onEvent
-        lock.unlock()
+        let onEvent = lock.withLock { self.onEvent }
         onEvent?(event)
     }
 
@@ -51,11 +48,13 @@ final class AVPlayerAdapter: Player {
     }
 
     func startObserving(onEvent: @escaping (PlayerEvent) -> Void) {
-        lock.lock()
-        let wasObserving = self.onEvent != nil
-        if !wasObserving { self.onEvent = onEvent }
-        lock.unlock()
-        guard !wasObserving else { return }
+        // Claimed in one atomic step, so two concurrent calls cannot both believe they won.
+        let claimed = lock.withLock {
+            guard self.onEvent == nil else { return false }
+            self.onEvent = onEvent
+            return true
+        }
+        guard claimed else { return }
         guard let player else { return emit(.released) }
         sentinelKey = ReleaseSentinel.attach(to: player) { [weak self] in self?.emit(.released) }
 
@@ -85,11 +84,8 @@ final class AVPlayerAdapter: Player {
     }
 
     func stopObserving() {
-        lock.lock()
-        onEvent = nil
-        lock.unlock()
-        // Unlocked from here: registering `.initial` KVO and posting a notification both reach `emit`
-        // synchronously, and the lock is not recursive. The `if let` pins the player against a concurrent release.
+        lock.withLock { onEvent = nil }
+        // Unlocked from here: `.initial` KVO and posted notifications reach `emit`, and the lock is not recursive.
         if let player, let sentinelKey { ReleaseSentinel.detach(from: player, key: sentinelKey) }
         sentinelKey = nil
         timeControlStatusObserver?.invalidate()
