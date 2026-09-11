@@ -1,7 +1,8 @@
 import Foundation
 
 /// Where the playhead is. `duration` is nil when the length is unknown — a live stream, or an item that has
-/// not loaded it yet.
+/// not loaded it yet. It is reported as given, so answering nil after a real length might reclassify the viewing
+/// as live.
 struct Playhead: Equatable {
     let position: TimeInterval
     let duration: TimeInterval?
@@ -13,7 +14,7 @@ enum PlayerEvent: Equatable {
     case played
     /// Playback stopped without reaching the end. Not for buffering.
     case paused
-    /// Optional: a seek is coming and the playhead has not moved yet. Sending it makes watch time exact.
+    /// Optional, only before the playhead moves: makes watch time exact. Free to repeat; any other event ends it.
     case seeking
     /// The playhead moved by something other than playing. Required if your player can seek, or the SDK
     /// counts the jump as watched.
