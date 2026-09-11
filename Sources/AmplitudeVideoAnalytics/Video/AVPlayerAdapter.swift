@@ -48,13 +48,13 @@ final class AVPlayerAdapter: Player {
     }
 
     func startObserving(onEvent: @escaping (PlayerEvent) -> Void) {
-        // Claimed in one atomic step, so two concurrent calls cannot both believe they won.
-        let claimed = lock.withLock {
-            guard self.onEvent == nil else { return false }
+        // Read and taken in one atomic step, so two concurrent calls cannot both get past the guard.
+        let wasObserving = lock.withLock {
+            guard self.onEvent == nil else { return true }
             self.onEvent = onEvent
-            return true
+            return false
         }
-        guard claimed else { return }
+        guard !wasObserving else { return }
         guard let player else { return emit(.released) }
         sentinelKey = ReleaseSentinel.attach(to: player) { [weak self] in self?.emit(.released) }
 
