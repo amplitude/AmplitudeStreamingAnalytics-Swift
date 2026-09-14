@@ -231,8 +231,9 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         XCTAssertEqual(integrator.activeSessionCount, 1)
         XCTAssertEqual(player.startObservingCount, 1, "a live session: start() only observes while not final")
 
-        player.fire(.played)
-        player.fire(.released)   // the player is gone: the observer finishes on its own
+        // Released without ever playing: no play is open, so this emits no events and the plugin's
+        // real transport — built by setup(), with a real uploader — is never asked to send anything.
+        player.fire(.released)
 
         let deadline = Date().addingTimeInterval(2)
         while integrator.activeSessionCount != 0 && Date() < deadline {

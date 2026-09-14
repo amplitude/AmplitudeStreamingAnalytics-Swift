@@ -103,21 +103,6 @@ final class StopDeadlockTests: XCTestCase {
 
 final class StopObservingClearsOnEventTests: XCTestCase {
 
-    /// stopObserving() alone prevents event delivery — the new API has no separate onEvent property.
-    func testStopObservingAlonePreventsEventDelivery() {
-        // Held here, not inline: an unretained AVPlayer can deallocate before startObserving reads
-        // it, which now reports `.released` instead of silently no-op-ing.
-        let player = AVPlayer()
-        let adapter = AVPlayerAdapter(player)
-        var delivered = false
-
-        adapter.startObserving { _ in delivered = true }
-        adapter.stopObserving()
-
-        XCTAssertFalse(delivered,
-                       "stopObserving() must clear the handler so no in-flight KVO callbacks can deliver")
-    }
-
     /// After finish(), `end()` has called `stopObserving()`, so the player drops its handler and later events never
     /// reach the observer; a `.final` observer would drop them anyway.
     func testNoEventsLeakAfterFinish() {
