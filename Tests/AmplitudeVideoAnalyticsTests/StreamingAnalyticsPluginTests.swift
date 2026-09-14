@@ -20,9 +20,10 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         var config = StreamingAnalyticsConfig()
         config.sampleInterval = 0.05
         config.delayedEventTtl = 1.234
+        let transport = makeTransport(on: amplitude, uploading: uploader)
         plugin = StreamingAnalyticsPlugin(config: config,
-                                          transport: makeTransport(on: amplitude, uploading: uploader),
-                                          makePulse: PulseTimer.init)
+                                          delayedEventsFactory: { _, _ in transport },
+                                          pulseTimerFactory: PulseTimer.init)
         amplitude.add(plugin: plugin)
     }
 
@@ -97,12 +98,15 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
 
         var config = StreamingAnalyticsConfig()
         config.sampleInterval = 0.25
-        let pulsed = StreamingAnalyticsPlugin(config: config, transport: transport) { interval, queue, handler in
-            pulseInterval = interval
-            pulseQueue = queue
-            tick = handler
-            return PulseTimer(interval: 3_600, queue: queue, handler: handler)
-        }
+        let pulsed = StreamingAnalyticsPlugin(
+            config: config,
+            delayedEventsFactory: { _, _ in transport },
+            pulseTimerFactory: { interval, queue, handler in
+                pulseInterval = interval
+                pulseQueue = queue
+                tick = handler
+                return PulseTimer(interval: 3_600, queue: queue, handler: handler)
+            })
         host.add(plugin: pulsed)
 
         let player = FakePlayer()
@@ -213,9 +217,35 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         XCTAssertEqual(detached.activeSessionCount, 0)
     }
 
-    /// The only path a customer takes: public init, then amplitude.add(plugin:) builds the transport
-    /// in setup. The TTL is not theirs to set, so this pins the default reaching the transport.
-    func testPublicInitBuildsTheTransportOnSetupWithTheDefaultTtl() {
+    /// The TTL a customer gets is not theirs to set, and the config states it in seconds while the wire
+    /// counts milliseconds. The factory reports the configuration the plugin built, so the conversion is
+    /// pinned to a literal rather than to a repeat of the production expression.
+    func testTheDefaultTtlInSecondsReachesTheTransportInMilliseconds() {
+        var built: DelayedEventsConfiguration?
+        let host = Amplitude(configuration: Configuration(apiKey: "ttl-\(UUID().uuidString)",
+                                                          instanceName: "ttl-\(UUID().uuidString)",
+                                                          autocapture: [],
+                                                          offline: true))
+        let ownUploader = FakeDelayedEventsUploader()
+        let integrator = StreamingAnalyticsPlugin(
+            config: StreamingAnalyticsConfig(),
+            delayedEventsFactory: { amplitude, configuration in
+                built = configuration
+                let tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
+                                                  configuration: configuration,
+                                                  httpClient: ownUploader)
+                return DelayedEvents(amplitude: amplitude, configuration: configuration, tracker: tracker)
+            },
+            pulseTimerFactory: PulseTimer.init)
+
+        host.add(plugin: integrator)
+
+        XCTAssertEqual(built?.ttlMs, 3_600_000, "delayedEventTtl is one hour, stated in seconds")
+    }
+
+    /// The only path a customer takes: public init, then amplitude.add(plugin:) builds the transport in
+    /// setup. Nothing plays, so the real uploader that setup wires up is never asked to send.
+    func testPublicInitTracksThroughTheTransportItBuilds() {
         let integrator = StreamingAnalyticsPlugin()
         let host = Amplitude(configuration: Configuration(apiKey: "integrator-\(UUID().uuidString)",
                                                           instanceName: "integrator-\(UUID().uuidString)",
@@ -226,8 +256,6 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         let player = FakePlayer()
         integrator.trackVideo(player: player, options: VideoTrackingOptions())
 
-        XCTAssertEqual(integrator.transport?.configuration.ttlMs,
-                       Int64(StreamingAnalyticsConfig().delayedEventTtl * 1000))
         XCTAssertEqual(integrator.activeSessionCount, 1)
         XCTAssertEqual(player.startObservingCount, 1, "a live session: start() only observes while not final")
 

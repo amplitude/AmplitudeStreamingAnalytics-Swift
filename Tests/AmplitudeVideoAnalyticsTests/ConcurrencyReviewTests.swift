@@ -29,7 +29,9 @@ final class DeinitFinalizationTests: XCTestCase {
         let player = FakePlayer()
 
         autoreleasepool {
-            let plugin = StreamingAnalyticsPlugin(config: config, transport: transport, makePulse: PulseTimer.init)
+            let plugin = StreamingAnalyticsPlugin(config: config,
+                                                  delayedEventsFactory: { _, _ in transport },
+                                                  pulseTimerFactory: PulseTimer.init)
             amplitude.add(plugin: plugin)
             plugin.trackVideo(player: player, options: VideoTrackingOptions())
             player.fire(.played)
@@ -201,7 +203,9 @@ final class DeinitOffQueueReadTests: XCTestCase {
         let player = FakePlayer()
 
         autoreleasepool {
-            let plugin = StreamingAnalyticsPlugin(config: config, transport: transport, makePulse: PulseTimer.init)
+            let plugin = StreamingAnalyticsPlugin(config: config,
+                                                  delayedEventsFactory: { _, _ in transport },
+                                                  pulseTimerFactory: PulseTimer.init)
             amplitude.add(plugin: plugin)
             plugin.trackVideo(player: player, options: VideoTrackingOptions())
             player.fire(.played)
@@ -233,6 +237,11 @@ final class SetupTrackVideoRaceTests: XCTestCase {
         let plugin = StreamingAnalyticsPlugin()
         amplitude.add(plugin: plugin)
 
-        XCTAssertNotNil(plugin.transport, "transport is set after setup")
+        // Observed rather than read off the plugin: `track` registers a viewing only when the
+        // transport is already there, so a live count is the transport's readiness.
+        let player = FakePlayer()
+        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+
+        XCTAssertEqual(plugin.activeSessionCount, 1, "transport is set after setup, so the viewing registered")
     }
 }

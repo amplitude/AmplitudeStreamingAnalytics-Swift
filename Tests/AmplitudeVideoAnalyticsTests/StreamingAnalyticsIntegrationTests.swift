@@ -14,9 +14,10 @@ final class StreamingAnalyticsIntegrationTests: XCTestCase {
                                                                offline: true))
         let destination = RecordingDestination()
         amplitude.add(plugin: destination)
+        let transport = makeTransport(on: amplitude, uploading: uploader)
         let plugin = StreamingAnalyticsPlugin(config: StreamingAnalyticsConfig(),
-                                              transport: makeTransport(on: amplitude, uploading: uploader),
-                                              makePulse: PulseTimer.init)
+                                              delayedEventsFactory: { _, _ in transport },
+                                              pulseTimerFactory: PulseTimer.init)
         amplitude.add(plugin: plugin)
 
         let player = FakePlayer()

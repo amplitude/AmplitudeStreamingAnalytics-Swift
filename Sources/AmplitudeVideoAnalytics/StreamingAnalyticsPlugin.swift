@@ -7,27 +7,34 @@ struct StreamingAnalyticsConfig {
     var sampleInterval: TimeInterval = 1
 }
 
-/// Reports what your users watch as `[Amplitude] Stream Started` and `[Amplitude] Stream Stopped`.
+/// Reports what your users watch as Amplitude streaming events.
 /// Add it to your `Amplitude` instance, then call ``trackVideo(player:options:)-(AVPlayer,_)`` per viewing.
 public final class StreamingAnalyticsPlugin: UtilityPlugin {
     /// Builds the timer that samples one playing viewing. `PulseTimer.init` is the real one.
-    typealias MakePulse = (TimeInterval, DispatchQueue, @escaping () -> Void) -> PulseTimer
+    typealias PulseTimerFactory = (TimeInterval, DispatchQueue, @escaping () -> Void) -> PulseTimer
+    /// Builds the transport, once `setup(amplitude:)` supplies the host. `DelayedEvents.init` is the real one.
+    typealias DelayedEventsFactory = (Amplitude, DelayedEventsConfiguration) -> DelayedEvents
 
     private let config: StreamingAnalyticsConfig
-    private let makePulse: MakePulse
+    private let delayedEventsFactory: DelayedEventsFactory
+    private let pulseTimerFactory: PulseTimerFactory
     private let queue = DispatchQueue(label: "com.amplitude.streamingAnalytics")
 
-    private(set) var transport: DelayedEvents?
+    private var transport: DelayedEvents?
     private var observersByPlayer: [ObjectIdentifier: PlayerObserver] = [:]
 
     public override convenience init() {
-        self.init(config: StreamingAnalyticsConfig(), transport: nil, makePulse: PulseTimer.init)
+        self.init(config: StreamingAnalyticsConfig(),
+                  delayedEventsFactory: DelayedEvents.init(amplitude:configuration:),
+                  pulseTimerFactory: PulseTimer.init)
     }
 
-    init(config: StreamingAnalyticsConfig, transport: DelayedEvents?, makePulse: @escaping MakePulse) {
+    init(config: StreamingAnalyticsConfig,
+         delayedEventsFactory: @escaping DelayedEventsFactory,
+         pulseTimerFactory: @escaping PulseTimerFactory) {
         self.config = config
-        self.makePulse = makePulse
-        self.transport = transport
+        self.delayedEventsFactory = delayedEventsFactory
+        self.pulseTimerFactory = pulseTimerFactory
         super.init()
     }
 
@@ -43,10 +50,10 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
     public override func setup(amplitude: Amplitude) {
         super.setup(amplitude: amplitude)
         queue.sync {
-            if transport == nil {
-                let ttl = DelayedEventsConfiguration(ttlMs: config.delayedEventTtl.milliseconds)
-                transport = DelayedEvents(amplitude: amplitude, configuration: ttl)
-            }
+            guard transport == nil else { return }
+
+            let configuration = DelayedEventsConfiguration(ttlMs: config.delayedEventTtl.milliseconds)
+            transport = delayedEventsFactory(amplitude, configuration)
         }
     }
 
@@ -84,6 +91,8 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
             observersByPlayer.removeValue(forKey: identity)?.finish()
 
             let transformer = PlayerStateTransformer(options: options)
+            // Assigned below, because the closure cannot name the observer it belongs to until that
+            // observer exists. Taking `onChange` in `start` instead would let it capture it directly.
             weak var tracked: PlayerObserver?
             let observer = PlayerObserver(
                 player: player,
@@ -97,8 +106,8 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
                     guard state.phase == .final, self?.observersByPlayer[identity] === tracked else { return }
                     self?.observersByPlayer.removeValue(forKey: identity)
                 },
-                makePulse: { [makePulse, config, queue] tick in
-                    makePulse(config.sampleInterval, queue, tick)
+                makePulse: { [pulseTimerFactory, config, queue] tick in
+                    pulseTimerFactory(config.sampleInterval, queue, tick)
                 })
             tracked = observer
             observersByPlayer[identity] = observer
