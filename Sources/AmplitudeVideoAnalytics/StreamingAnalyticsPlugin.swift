@@ -91,15 +91,16 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
                 logger.error(message: "StreamingAnalyticsPlugin: trackVideo called before amplitude.add(plugin:); this video is not tracked.")
                 return
             }
-            // One viewing per player, as `Player.startObserving(onEvent:)` promises one layer down. A viewing
-            // that ended on its own has already evicted itself, because its `.final` reaches this same serial
-            // queue; one that has not is still live, and replacing it silently would drop what it was sending.
+            // One viewing per player, as `Player.startObserving(onEvent:)` promises one layer down.
+            // Replacing a registered viewing silently would drop whatever it was still sending.
             guard observersByPlayer[identity] == nil else {
                 logger.error(message: "StreamingAnalyticsPlugin: this player is already being tracked; call stopTracking(player:) before tracking it again.")
                 return
             }
 
             let transformer = PlayerStateTransformer(options: options)
+            // Assigned below: the closure cannot name the observer it belongs to until that observer exists.
+            weak var tracked: PlayerObserver?
             let observer = PlayerObserver(
                 player: player,
                 queue: queue,
@@ -108,13 +109,16 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
                     for event in transformer.events(for: state, at: Date()) {
                         transport.track(event)
                     }
-                    // No replacement can be sitting at this key: tracking refuses while one is registered.
-                    guard state.phase == .final else { return }
+                    // `stopTracking` drops the entry at once but this `.final` is published later, so a
+                    // `trackVideo` enqueued in between is allowed and registers a live viewing here. Only
+                    // the observer still registered may evict itself.
+                    guard state.phase == .final, self?.observersByPlayer[identity] === tracked else { return }
                     self?.observersByPlayer.removeValue(forKey: identity)
                 },
                 makePulse: { [pulseTimerFactory, config, queue] tick in
                     pulseTimerFactory(config.sampleInterval, queue, tick)
                 })
+            tracked = observer
             observersByPlayer[identity] = observer
             observer.start()
         }
