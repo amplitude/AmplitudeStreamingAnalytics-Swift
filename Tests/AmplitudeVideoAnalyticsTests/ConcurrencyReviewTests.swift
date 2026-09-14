@@ -50,7 +50,7 @@ final class DeinitFinalizationTests: XCTestCase {
 }
 
 /// The closing event a viewing sends when it ends without the player saying why.
-private func isUntrackedStop(_ body: DelayedRequestBody) -> Bool {
+func isUntrackedStop(_ body: DelayedRequestBody) -> Bool {
     body.instantEvents?.contains { $0.eventProperties?["stop_reason"] as? String == "untracked" } == true
 }
 

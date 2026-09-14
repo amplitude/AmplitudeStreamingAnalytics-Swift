@@ -57,13 +57,17 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
         }
     }
 
-    /// Starts tracking one viewing on any ``Player``. Tracking the same player again ends the previous viewing.
+    /// Starts tracking one viewing on any ``Player``. A player already being tracked is left alone.
     func trackVideo(player: Player, options: VideoTrackingOptions) {
         track(player, keyedOn: ObjectIdentifier(player), options: options)
     }
 
     /// Starts tracking one viewing on an `AVPlayer`. It ends on its own when the player is deallocated, or
     /// call ``stopTracking(player:)`` to end it sooner.
+    ///
+    /// One viewing per player: if this player is already being tracked, the call is refused and logged, and
+    /// the viewing already running is left untouched. To track it again — a new video in the same player —
+    /// call ``stopTracking(player:)`` first.
     public func trackVideo(player avPlayer: AVPlayer, options: VideoTrackingOptions) {
         track(AVPlayerAdapter(avPlayer), keyedOn: ObjectIdentifier(avPlayer), options: options)
     }
@@ -87,13 +91,15 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
                 logger.error(message: "StreamingAnalyticsPlugin: trackVideo called before amplitude.add(plugin:); this video is not tracked.")
                 return
             }
-            // Ends before the replacement starts: both share one `Player`, and the later subscription wins.
-            observersByPlayer.removeValue(forKey: identity)?.finish()
+            // One viewing per player, as `Player.startObserving(onEvent:)` promises one layer down. A viewing
+            // that ended on its own has already evicted itself, because its `.final` reaches this same serial
+            // queue; one that has not is still live, and replacing it silently would drop what it was sending.
+            guard observersByPlayer[identity] == nil else {
+                logger.error(message: "StreamingAnalyticsPlugin: this player is already being tracked; call stopTracking(player:) before tracking it again.")
+                return
+            }
 
             let transformer = PlayerStateTransformer(options: options)
-            // Assigned below, because the closure cannot name the observer it belongs to until that
-            // observer exists. Taking `onChange` in `start` instead would let it capture it directly.
-            weak var tracked: PlayerObserver?
             let observer = PlayerObserver(
                 player: player,
                 queue: queue,
@@ -102,14 +108,13 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
                     for event in transformer.events(for: state, at: Date()) {
                         transport.track(event)
                     }
-                    // Retracking replaces the entry before this observer's late `.final` lands.
-                    guard state.phase == .final, self?.observersByPlayer[identity] === tracked else { return }
+                    // No replacement can be sitting at this key: tracking refuses while one is registered.
+                    guard state.phase == .final else { return }
                     self?.observersByPlayer.removeValue(forKey: identity)
                 },
                 makePulse: { [pulseTimerFactory, config, queue] tick in
                     pulseTimerFactory(config.sampleInterval, queue, tick)
                 })
-            tracked = observer
             observersByPlayer[identity] = observer
             observer.start()
         }

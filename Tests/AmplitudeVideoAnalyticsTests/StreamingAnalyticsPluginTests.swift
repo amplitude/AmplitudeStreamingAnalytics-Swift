@@ -131,7 +131,9 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         wait(for: [sampled], timeout: 5)
     }
 
-    func testRetrackingTheSamePlayerStopsThePreviousSession() {
+    /// One viewing per player: the second call is refused and the first viewing keeps running, rather than
+    /// being ended by a caller who only meant to start one.
+    func testRetrackingTheSamePlayerIsRefusedAndLeavesTheViewingRunning() {
         let player = FakePlayer()
         plugin.trackVideo(player: player, options: VideoTrackingOptions())
         player.fire(.played)
@@ -139,10 +141,28 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
 
         plugin.trackVideo(player: player, options: VideoTrackingOptions())
 
-        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["stop_reason"] as? String == "untracked" } == true }
         XCTAssertEqual(plugin.activeSessionCount, 1)
-        XCTAssertEqual(player.stopObservingCount, 1, "the previous observer stopped")
-        XCTAssertEqual(player.startObservingCount, 2, "retracking started a new observer")
+        XCTAssertEqual(player.startObservingCount, 1, "no second observer subscribed")
+        XCTAssertEqual(player.stopObservingCount, 0, "the running viewing was not torn down")
+        XCTAssertNotNil(player.onEvent, "the original viewing is still subscribed to the player")
+        XCTAssertFalse(uploader.bodies.contains(where: isUntrackedStop), "the running viewing did not send a closing event")
+    }
+
+    /// The refusal is on a *live* viewing. One that ended on its own has already evicted itself — its `.final`
+    /// reaches the plugin on the same serial queue `trackVideo` uses — so the player can be tracked again.
+    func testTrackingAgainAfterTheViewingEndedOnItsOwnIsAllowed() {
+        let player = FakePlayer()
+        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        player.fire(.played)
+        waitForUpload { !$0.events.isEmpty }
+
+        player.fire(.released)
+        waitForUpload(matching: isUntrackedStop)
+
+        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+
+        XCTAssertEqual(plugin.activeSessionCount, 1, "the ended viewing evicted itself, so this one registered")
+        XCTAssertEqual(player.startObservingCount, 2)
     }
 
     func testStopTrackingEndsTheViewing() {
@@ -163,21 +183,6 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         plugin.stopTracking(player: player)
         XCTAssertEqual(plugin.activeSessionCount, 0)
         XCTAssertEqual(player.stopObservingCount, 0)
-    }
-
-    /// The previous viewing must stop observing *before* the new one subscribes. Both observers share one
-    /// `Player`, so a teardown that lands late clears the subscription the new viewing just installed and
-    /// the replacement viewing goes deaf.
-    func testRetrackingLeavesTheNewViewingObserving() {
-        let player = FakePlayer()
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
-        player.fire(.played)
-        waitForUpload { !$0.events.isEmpty }
-
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
-        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["stop_reason"] as? String == "untracked" } == true }
-
-        XCTAssertNotNil(player.onEvent, "the replacement viewing is still subscribed to the player")
     }
 
     func testTwoPlayersAreTwoViewings() {
@@ -275,7 +280,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         plugin.trackVideo(player: player, options: VideoTrackingOptions())
         XCTAssertEqual(plugin.activeSessionCount, 1)
         plugin.trackVideo(player: player, options: VideoTrackingOptions())
-        XCTAssertEqual(plugin.activeSessionCount, 1, "re-tracking the same AVPlayer replaces its session")
+        XCTAssertEqual(plugin.activeSessionCount, 1, "re-tracking the same AVPlayer is refused")
         XCTAssertTrue(uploader.bodies.isEmpty, "no play, nothing sent")
     }
 
