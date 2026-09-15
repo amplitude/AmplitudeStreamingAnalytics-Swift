@@ -6,9 +6,9 @@ Activity panel showing the `[Amplitude] Stream *` events the plugin emits.
 
 The `StreamingAnalyticsPlugin` is registered once at launch (see `DemoAnalytics.swift`)
 against a placeholder `DEMO-API-KEY`; each screen calls `trackVideo(player:options:)` when
-its `AVPlayer` starts. The UIKit screen also calls `stopTracking(player:)` when its player is
-dismissed; the SwiftUI screen leaves its viewing to end with the player. Swap in a real project
-key to see events land in a project.
+its `AVPlayer` starts, once per player. The UIKit screen also calls `stopTracking(player:)` when
+its player is dismissed; the SwiftUI screen leaves its viewing to end with the player. Swap in a
+real project key to see events land in a project.
 
 ## Run
 
