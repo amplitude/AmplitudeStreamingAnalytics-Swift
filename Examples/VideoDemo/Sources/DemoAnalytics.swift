@@ -54,6 +54,10 @@ private final class StreamActivityRecorder: BeforePlugin {
 
     override func execute(event: BaseEvent) -> BaseEvent? {
         guard event.eventType.hasPrefix("[Amplitude] Stream") else { return event }
+        // A `timeout` stop is the once-a-second row the server holds open, not a viewing that ended.
+        // Listing those buries every real event, so the panel shows only what a viewer did.
+        guard event.eventProperties?["stop_reason"] as? String != "timeout" else { return event }
+
         log.record(StreamActivityEntry(eventType: event.eventType, detail: summarize(event)))
         return event
     }
