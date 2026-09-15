@@ -20,10 +20,10 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testEventWithoutInsertIdIsRejected() {
         let tracker = makeTracker()
-        tracker.track(DelayedEvent(copying: BaseEvent(eventType: "Content Playing"), kind: .delayed))
+        tracker.track(DelayedEvent(copying: BaseEvent(eventType: "Content Playing"), kind: .delayed), sending: true)
         expectNoUpload(beyond: 0)
 
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
         XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["a"])
     }
@@ -32,9 +32,9 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testTrackDelayedSendsEntireCollection() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
-        tracker.track(makeDelayed("b"))
+        tracker.track(makeDelayed("b"), sending: true)
         waitForUploads(2)
 
         XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["a"])
@@ -46,11 +46,11 @@ final class DelayedEventTrackerTests: XCTestCase {
         let tracker = makeTracker(ttlMs: 1_234)
         // An in-flight request holds both tracks below until they can share one.
         uploader.autoSettle = nil
-        tracker.track(makeDelayed("warmup"))
+        tracker.track(makeDelayed("warmup"), sending: true)
         waitForUploads(1)
 
-        tracker.track(makeInstant("start"))
-        tracker.track(makeDelayed("stop"))
+        tracker.track(makeInstant("start"), sending: true)
+        tracker.track(makeDelayed("stop"), sending: true)
         uploader.settle(at: 0, with: ok)
 
         waitForUploads(2)
@@ -63,12 +63,12 @@ final class DelayedEventTrackerTests: XCTestCase {
     /// A refresh replaces the entry without sending, so it surfaces on the next request out.
     func testReTrackingSameInsertIdReplacesInPlace() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a", type: "First"))
+        tracker.track(makeDelayed("a", type: "First"), sending: true)
         waitForUploads(1)
-        tracker.track(makeDelayed("a", type: "Second", forcePulse: false))
+        tracker.track(makeDelayed("a", type: "Second"), sending: false)
         expectNoUpload(beyond: 1)
 
-        tracker.track(makeDelayed("b"))
+        tracker.track(makeDelayed("b"), sending: true)
         waitForUploads(2)
 
         let events = uploader.bodies[1].events
@@ -78,13 +78,13 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testTtlIsSentWithDelayedEntriesAndZeroForInstantsOnly() {
         let tracker = makeTracker(ttlMs: 1_234)
-        tracker.track(makeInstant("i"))
+        tracker.track(makeInstant("i"), sending: true)
         waitForUploads(1)
         XCTAssertEqual(uploader.bodies[0].ttlMs, 0)
         XCTAssertTrue(uploader.bodies[0].events.isEmpty)
         XCTAssertEqual(uploader.bodies[0].instantEvents?.compactMap(\.insertId), ["i"])
 
-        tracker.track(makeDelayed("d"))
+        tracker.track(makeDelayed("d"), sending: true)
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].ttlMs, 1_234)
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["d"])
@@ -105,10 +105,10 @@ final class DelayedEventTrackerTests: XCTestCase {
     private func assertInstantDropped(settlingWith result: Result<DelayedResponseBody, Error>) {
         uploader.autoSettle = result
         let tracker = makeTracker()
-        tracker.track(makeInstant("i"))
+        tracker.track(makeInstant("i"), sending: true)
         waitForUploads(1)
 
-        tracker.track(makeDelayed("d"))
+        tracker.track(makeDelayed("d"), sending: true)
         waitForUploads(2)
         XCTAssertNil(uploader.bodies[1].instantEvents)
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["d"])
@@ -116,7 +116,7 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testDelayedEventSurvivesSuccessAndIsResentOnNextPulse() {
         let tracker = makeTracker(pulseInterval: 0.05)
-        tracker.track(makeDelayed("d"))
+        tracker.track(makeDelayed("d"), sending: true)
         waitForUploads(1)
 
         withExtendedLifetime(tracker) { waitForUploads(2) }
@@ -127,13 +127,13 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testSizeLimitRejectsOffendingEventAndKeepsPriorState() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
 
-        tracker.track(makeDelayed("big", type: oversizedEventType))
+        tracker.track(makeDelayed("big", type: oversizedEventType), sending: true)
         expectNoUpload(beyond: 1)
 
-        tracker.track(makeDelayed("c"))
+        tracker.track(makeDelayed("c"), sending: true)
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["a", "c"])
     }
@@ -142,15 +142,15 @@ final class DelayedEventTrackerTests: XCTestCase {
     /// be admitted must not cost us the live snapshot the server is already holding.
     func testOversizedRefreshKeepsTheLiveEntry() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a", type: "First"))
+        tracker.track(makeDelayed("a", type: "First"), sending: true)
         waitForUploads(1)
-        tracker.track(makeDelayed("b"))
+        tracker.track(makeDelayed("b"), sending: true)
         waitForUploads(2)
 
-        tracker.track(makeDelayed("a", type: oversizedEventType))
+        tracker.track(makeDelayed("a", type: oversizedEventType), sending: true)
         expectNoUpload(beyond: 2)
 
-        tracker.track(makeDelayed("c"))
+        tracker.track(makeDelayed("c"), sending: true)
         waitForUploads(3)
         XCTAssertEqual(uploader.bodies[2].events.compactMap(\.insertId), ["a", "b", "c"])
         XCTAssertEqual(uploader.bodies[2].events[0].eventType, "First", "the admitted version survives")
@@ -160,39 +160,39 @@ final class DelayedEventTrackerTests: XCTestCase {
         let tracker = makeTracker()
         let filler = String(repeating: "x", count: 8_000)
         for (index, id) in ["a", "b", "c", "d"].enumerated() {
-            tracker.track(makeDelayed(id, type: filler))
+            tracker.track(makeDelayed(id, type: filler), sending: true)
             waitForUploads(index + 1)
         }
 
-        tracker.track(makeDelayed("e", type: filler))
+        tracker.track(makeDelayed("e", type: filler), sending: true)
         expectNoUpload(beyond: 4)
 
-        tracker.track(makeDelayed("f"))
+        tracker.track(makeDelayed("f"), sending: true)
         waitForUploads(5)
         XCTAssertEqual(uploader.bodies[4].events.compactMap(\.insertId), ["a", "b", "c", "d", "f"])
     }
 
     func testConfiguredSizeLimitReplacesTheDefaultOne() {
         let tracker = makeTracker(eventsSizeLimit: 2_000)
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
 
         // Well under the 40 kB default, over the limit this tracker was given.
-        tracker.track(makeDelayed("b", type: String(repeating: "x", count: 3_000)))
+        tracker.track(makeDelayed("b", type: String(repeating: "x", count: 3_000)), sending: true)
         expectNoUpload(beyond: 1)
     }
 
     func testUnencodableEventIsRejectedAndKeepsPriorState() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
 
         let bad = makeEvent("bad")
         bad.eventProperties = ["duration": Double.nan]
-        tracker.track(DelayedEvent(copying: bad, kind: .delayed))
+        tracker.track(DelayedEvent(copying: bad, kind: .delayed), sending: true)
         expectNoUpload(beyond: 1)
 
-        tracker.track(makeDelayed("c"))
+        tracker.track(makeDelayed("c"), sending: true)
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["a", "c"])
     }
@@ -203,19 +203,19 @@ final class DelayedEventTrackerTests: XCTestCase {
     /// pulse, because refreshes arrive far faster than the pulse does.
     func testRefreshDoesNotTriggerUpload() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a", type: "First"))
+        tracker.track(makeDelayed("a", type: "First"), sending: true)
         waitForUploads(1)
 
-        tracker.track(makeDelayed("a", type: "Second", forcePulse: false))
+        tracker.track(makeDelayed("a", type: "Second"), sending: false)
         expectNoUpload(beyond: 1)
     }
 
     func testUnknownInsertIdIsANewEntryAndSends() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
 
-        tracker.track(makeDelayed("b"))
+        tracker.track(makeDelayed("b"), sending: true)
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["a", "b"])
     }
@@ -223,19 +223,19 @@ final class DelayedEventTrackerTests: XCTestCase {
     /// An instant always sends, even for an id already live — that is how an entry is finalized.
     func testInstantForALiveEntrySendsImmediately() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
 
-        tracker.track(makeInstant("a"))
+        tracker.track(makeInstant("a"), sending: true)
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].instantEvents?.compactMap(\.insertId), ["a"])
     }
 
     func testUpdatedPropertiesAppearOnNextPulse() {
         let tracker = makeTracker(pulseInterval: 0.05)
-        tracker.track(makeDelayed("a", type: "First"))
+        tracker.track(makeDelayed("a", type: "First"), sending: true)
         waitForUploads(1)
-        tracker.track(makeDelayed("a", type: "Second", forcePulse: false))
+        tracker.track(makeDelayed("a", type: "Second"), sending: false)
 
         withExtendedLifetime(tracker) {
             waitForUpload { body in
@@ -246,13 +246,13 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testRefreshKeepsPreviousEventOnOverflow() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a", type: "First"))
+        tracker.track(makeDelayed("a", type: "First"), sending: true)
         waitForUploads(1)
 
-        tracker.track(makeDelayed("a", type: oversizedEventType))
+        tracker.track(makeDelayed("a", type: oversizedEventType), sending: true)
         expectNoUpload(beyond: 1)
 
-        tracker.track(makeDelayed("b"))
+        tracker.track(makeDelayed("b"), sending: true)
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["First", "Content Playing"])
     }
@@ -270,9 +270,9 @@ final class DelayedEventTrackerTests: XCTestCase {
     private func assertFlushDropsEntries(settlingWith result: Result<DelayedResponseBody, Error>) {
         uploader.autoSettle = result
         let tracker = makeTracker(ttlMs: 1_234)
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
-        tracker.track(makeDelayed("b"))
+        tracker.track(makeDelayed("b"), sending: true)
         waitForUploads(2)
 
         tracker.flush()
@@ -280,7 +280,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         XCTAssertEqual(uploader.bodies[2].ttlMs, 0)
         XCTAssertEqual(uploader.bodies[2].events.compactMap(\.insertId), ["a", "b"])
 
-        tracker.track(makeDelayed("c"))
+        tracker.track(makeDelayed("c"), sending: true)
         waitForUploads(4)
         XCTAssertEqual(uploader.bodies[3].events.compactMap(\.insertId), ["c"])
         XCTAssertEqual(uploader.bodies[3].id, uploader.bodies[2].id)
@@ -289,14 +289,14 @@ final class DelayedEventTrackerTests: XCTestCase {
     func testFlushKeepsEntriesUntilTheRequestSettles() {
         uploader.autoSettle = nil
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
         uploader.settle(at: 0, with: ok)
 
         tracker.flush()
         waitForUploads(2)
         // Held rather than sent beside the flush; it rides the request issued once that settles.
-        tracker.track(makeDelayed("b"))
+        tracker.track(makeDelayed("b"), sending: true)
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 2) }
 
         uploader.settle(at: 1, with: ok)
@@ -308,7 +308,7 @@ final class DelayedEventTrackerTests: XCTestCase {
     func testFlushSuspendsPulseWhileTheRequestIsInFlight() {
         uploader.autoSettle = nil
         let tracker = makeTracker(pulseInterval: 0.05)
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
         uploader.settle(at: 0, with: ok)
 
@@ -322,7 +322,7 @@ final class DelayedEventTrackerTests: XCTestCase {
     func testUpdateDuringInFlightFlushDoesNotResumeThePulse() {
         uploader.autoSettle = nil
         let tracker = makeTracker(pulseInterval: 0.05)
-        tracker.track(makeDelayed("a", type: "First"))
+        tracker.track(makeDelayed("a", type: "First"), sending: true)
         waitForUploads(1)
         uploader.settle(at: 0, with: ok)
 
@@ -330,7 +330,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         waitForUploads(2)
         // The flush is never settled, so "a" is still local; an update on it must not
         // restart the pulse the flush suspended, or it would re-upsert the deleted row.
-        tracker.track(makeDelayed("a", type: "Second", forcePulse: false))
+        tracker.track(makeDelayed("a", type: "Second"), sending: false)
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 2, timeout: 0.3) }
     }
 
@@ -339,7 +339,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         tracker.flush()
         expectNoUpload(beyond: 0)
 
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
         XCTAssertEqual(uploader.bodies[0].ttlMs, 1_234)
         XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["a"])
@@ -348,7 +348,7 @@ final class DelayedEventTrackerTests: XCTestCase {
     func testDeferredFlushIsDroppedWhenTheEarlierOneDrainsEverything() {
         uploader.autoSettle = nil
         let tracker = makeTracker(ttlMs: 1_234)
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
         uploader.settle(at: 0, with: ok)
 
@@ -357,7 +357,7 @@ final class DelayedEventTrackerTests: XCTestCase {
         tracker.flush()
         uploader.settle(at: 1, with: ok)
 
-        tracker.track(makeDelayed("b"))
+        tracker.track(makeDelayed("b"), sending: true)
         waitForUploads(3)
         XCTAssertEqual(uploader.bodies[2].ttlMs, 1_234)
         XCTAssertEqual(uploader.bodies[2].events.compactMap(\.insertId), ["b"])
@@ -374,12 +374,12 @@ final class DelayedEventTrackerTests: XCTestCase {
     func testSendWaitsForTheInFlightRequestAndCoalesces() {
         uploader.autoSettle = nil
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
 
         // A second request racing this one could land first and restore stale state.
-        tracker.track(makeDelayed("b"))
-        tracker.track(makeDelayed("c"))
+        tracker.track(makeDelayed("b"), sending: true)
+        tracker.track(makeDelayed("c"), sending: true)
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 1) }
 
         uploader.settle(at: 0, with: ok)
@@ -391,7 +391,7 @@ final class DelayedEventTrackerTests: XCTestCase {
     func testFlushIsSentOnlyAfterTheInFlightRequestSettles() {
         uploader.autoSettle = nil
         let tracker = makeTracker(ttlMs: 1_234)
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
 
         // A slower request landing after the flush would recreate the row it had deleted.
@@ -407,11 +407,11 @@ final class DelayedEventTrackerTests: XCTestCase {
     func testUpdateDuringAnInFlightRequestRidesTheOwedSend() {
         uploader.autoSettle = nil
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a", type: "First"))
+        tracker.track(makeDelayed("a", type: "First"), sending: true)
         waitForUploads(1)
 
-        tracker.track(makeDelayed("b"))       // owes a send, held by the gate
-        tracker.track(makeDelayed("a", type: "Second", forcePulse: false))
+        tracker.track(makeDelayed("b"), sending: true)   // owes a send, held by the gate
+        tracker.track(makeDelayed("a", type: "Second"), sending: false)
 
         uploader.settle(at: 0, with: ok)
         waitForUploads(2)
@@ -423,15 +423,15 @@ final class DelayedEventTrackerTests: XCTestCase {
     /// Nothing goes out on its own, not even a new entry: admission and sending are separate calls.
     func testUnforcedTrackDoesNotSendOnItsOwn() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a", forcePulse: false))
-        tracker.track(makeInstant("i", forcePulse: false))
+        tracker.track(makeDelayed("a"), sending: false)
+        tracker.track(makeInstant("i"), sending: false)
 
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 0) }
     }
 
     func testUnforcedTrackRidesTheNextPulse() {
         let tracker = makeTracker(pulseInterval: 0.05)
-        tracker.track(makeDelayed("a", forcePulse: false))
+        tracker.track(makeDelayed("a"), sending: false)
 
         withExtendedLifetime(tracker) { waitForUploads(1) }
         XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["a"])
@@ -439,10 +439,10 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testRefreshWithForcePulseDoesNotWaitForThePulse() {
         let tracker = makeTracker(ttlMs: 1_234)
-        tracker.track(makeDelayed("a", type: "First"))
+        tracker.track(makeDelayed("a", type: "First"), sending: true)
         waitForUploads(1)
 
-        tracker.track(makeDelayed("a", type: "Second", forcePulse: true))
+        tracker.track(makeDelayed("a", type: "Second"), sending: true)
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second"])
         XCTAssertEqual(uploader.bodies[1].ttlMs, 1_234, "the row keeps its TTL")
@@ -451,10 +451,10 @@ final class DelayedEventTrackerTests: XCTestCase {
     /// The send belongs to the entry, not to the call: a refresh that is not admitted sends nothing.
     func testForcePulseOnARejectedRefreshSendsNothing() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a", type: "First"))
+        tracker.track(makeDelayed("a", type: "First"), sending: true)
         waitForUploads(1)
 
-        tracker.track(makeDelayed("a", type: oversizedEventType, forcePulse: true))
+        tracker.track(makeDelayed("a", type: oversizedEventType), sending: true)
         expectNoUpload(beyond: 1)
     }
 
@@ -462,24 +462,24 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testDiscardClearsStateAndSendsNothing() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
 
         tracker.discard()
         expectNoUpload(beyond: 1)
 
-        tracker.track(makeDelayed("b"))
+        tracker.track(makeDelayed("b"), sending: true)
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["b"])
     }
 
     func testDiscardRotatesDelayIdSoTheAbandonedRowIsLeftAlone() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
 
         tracker.discard()
-        tracker.track(makeDelayed("b"))
+        tracker.track(makeDelayed("b"), sending: true)
         waitForUploads(2)
         XCTAssertNotEqual(uploader.bodies[0].id, uploader.bodies[1].id)
     }
@@ -495,12 +495,12 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     func testDelayedEventRoutesToTheLaneItsKindNames() {
         let tracker = makeTracker()
-        tracker.track(makeDelayed("a"))
+        tracker.track(makeDelayed("a"), sending: true)
         waitForUploads(1)
         XCTAssertEqual(uploader.bodies[0].events.compactMap(\.insertId), ["a"])
         XCTAssertNil(uploader.bodies[0].instantEvents)
 
-        tracker.track(makeInstant("b"))
+        tracker.track(makeInstant("b"), sending: true)
         waitForUploads(2)
         XCTAssertEqual(uploader.bodies[1].instantEvents?.compactMap(\.insertId), ["b"])
     }
@@ -523,20 +523,12 @@ final class DelayedEventTrackerTests: XCTestCase {
 
     /// Forces by default: most tests here are about routing, lanes or admission, not scheduling.
     /// A test that cares when the request goes out says `forcePulse:` explicitly.
-    private func makeDelayed(_ insertId: String,
-                             type: String = "Content Playing",
-                             forcePulse: Bool = true) -> DelayedEvent {
-        let event = DelayedEvent(copying: makeEvent(insertId, type: type), kind: .delayed)
-        if forcePulse { event.markForcePulse() }
-        return event
+    private func makeDelayed(_ insertId: String, type: String = "Content Playing") -> DelayedEvent {
+        DelayedEvent(copying: makeEvent(insertId, type: type), kind: .delayed)
     }
 
-    private func makeInstant(_ insertId: String,
-                             type: String = "Content Playing",
-                             forcePulse: Bool = true) -> DelayedEvent {
-        let event = DelayedEvent(copying: makeEvent(insertId, type: type), kind: .instant)
-        if forcePulse { event.markForcePulse() }
-        return event
+    private func makeInstant(_ insertId: String, type: String = "Content Playing") -> DelayedEvent {
+        DelayedEvent(copying: makeEvent(insertId, type: type), kind: .instant)
     }
 
     private func makeEvent(_ insertId: String, type: String = "Content Playing") -> BaseEvent {

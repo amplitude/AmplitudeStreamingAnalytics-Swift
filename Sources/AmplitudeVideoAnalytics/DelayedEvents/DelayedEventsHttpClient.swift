@@ -51,9 +51,7 @@ final class DelayedEventsHttpClient: DelayedEventsUploading {
             return nil
         }
 
-        let endBackgroundTask = BackgroundTaskRunner.begin()
         let task = session.uploadTask(with: request, from: data) { [logger, id = body.id] responseData, response, error in
-            defer { endBackgroundTask?() }
             if let error {
                 logger?.error(message: "Delayed events request failed: id=\(id) \(error.localizedDescription)")
                 completion(.failure(error))

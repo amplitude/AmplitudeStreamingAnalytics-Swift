@@ -19,45 +19,44 @@ enum DelayedHosts {
     static let eu = "https://api.eu.amplitude.com/2/httpapi/delayed"
 }
 
-#if (os(iOS) || os(tvOS) || os(visionOS) || targetEnvironment(macCatalyst)) && !AMPLITUDE_DISABLE_UIKIT
-/// Owns a single `UIApplication` background task and ends it exactly once —
-/// whether the upload completes first or iOS's expiration handler fires first.
+/// Owns a single `UIApplication` background task and ends it exactly once — whether the upload
+/// completes first or iOS's expiration handler fires first. A no-op where UIKit is unavailable.
 ///
-/// `end()` can be called concurrently from the expiration handler (main thread) and
-/// the upload completion (URLSession's queue). It claims the identifier under a lock
-/// (read-and-clear in one step) so only the caller that claims a valid id ends the
-/// task; the other sees `.invalid` and no-ops. This avoids the double
-/// `endBackgroundTask` that iOS treats as a client bug ("already-invalid identifier").
-private final class BackgroundTask {
+/// Ending on `deinit` is what makes it safe to hand down the send path: no early return there can
+/// strand the assertion, because dropping the last reference ends it.
+///
+/// `end()` can be called concurrently from the expiration handler (main thread) and the upload
+/// completion (URLSession's queue). It claims the identifier under a lock (read-and-clear in one
+/// step) so only the caller that claims a valid id ends the task; the other sees `.invalid` and
+/// no-ops. This avoids the double `endBackgroundTask` that iOS treats as a client bug.
+final class BackgroundTask {
+#if (os(iOS) || os(tvOS) || os(visionOS) || targetEnvironment(macCatalyst)) && !AMPLITUDE_DISABLE_UIKIT
     private let lock = NSLock()
     private var identifier: UIBackgroundTaskIdentifier = .invalid
+#endif
 
-    init() {
+    /// `onExpiry` runs when iOS is about to revoke the assertion, before it is ended.
+    init(onExpiry: @escaping () -> Void) {
+#if (os(iOS) || os(tvOS) || os(visionOS) || targetEnvironment(macCatalyst)) && !AMPLITUDE_DISABLE_UIKIT
         identifier = UIApplication.shared.beginBackgroundTask { [weak self] in
+            onExpiry()
             self?.end()
         }
+#endif
+    }
+
+    deinit {
+        end()
     }
 
     func end() {
+#if (os(iOS) || os(tvOS) || os(visionOS) || targetEnvironment(macCatalyst)) && !AMPLITUDE_DISABLE_UIKIT
         lock.lock()
         let id = identifier
         identifier = .invalid
         lock.unlock()
         guard id != .invalid else { return }
         UIApplication.shared.endBackgroundTask(id)
-    }
-}
 #endif
-
-/// Keeps the app alive so an in-flight upload can finish when backgrounded.
-/// No-op on platforms without UIKit (e.g. macOS).
-enum BackgroundTaskRunner {
-    static func begin() -> (() -> Void)? {
-        #if (os(iOS) || os(tvOS) || os(visionOS) || targetEnvironment(macCatalyst)) && !AMPLITUDE_DISABLE_UIKIT
-        let task = BackgroundTask()
-        return { task.end() }
-        #else
-        return nil
-        #endif
     }
 }
