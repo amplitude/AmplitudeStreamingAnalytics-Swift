@@ -12,13 +12,13 @@ final class DelayedEventsHttpClientTests: XCTestCase {
 
     func testGetUrlDefaultsToUSDelayedHost() {
         let client = DelayedEventsHttpClient(configuration: Configuration(apiKey: "test-key"))
-        XCTAssertEqual(client.getUrl(), "https://api2.amplitude.com/2/httpapi/delayed")
+        XCTAssertEqual(client.getUrl(), "https://delayed-api.amplitude.com/2/httpapi/delayed")
     }
 
     func testGetUrlUsesEUDelayedHost() {
         let config = Configuration(apiKey: "test-key", serverZone: .EU)
         XCTAssertEqual(DelayedEventsHttpClient(configuration: config).getUrl(),
-                       "https://api.eu.amplitude.com/2/httpapi/delayed")
+                       "https://delayed-api.eu.amplitude.com/2/httpapi/delayed")
     }
 
     func testGetUrlAppendsDelayedToCustomServerUrl() {

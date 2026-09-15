@@ -14,9 +14,10 @@ enum DelayedEventsError: Error {
     case invalidResponse
 }
 
+/// Delayed events are their own service, not a route on the `api2` ingestion edge.
 enum DelayedHosts {
-    static let us = "https://api2.amplitude.com/2/httpapi/delayed"
-    static let eu = "https://api.eu.amplitude.com/2/httpapi/delayed"
+    static let us = "https://delayed-api.amplitude.com/2/httpapi/delayed"
+    static let eu = "https://delayed-api.eu.amplitude.com/2/httpapi/delayed"
 }
 
 #if (os(iOS) || os(tvOS) || os(visionOS) || targetEnvironment(macCatalyst)) && !AMPLITUDE_DISABLE_UIKIT
