@@ -6,6 +6,10 @@ import Foundation
 /// without being committed. Xcode: set it on the VideoDemo scheme's Run action.
 private let demoAPIKey = ProcessInfo.processInfo.environment["AMPLITUDE_API_KEY"] ?? "DEMO-API-KEY"
 
+/// `AMPLITUDE_SERVER_URL` points the delayed transport at a non-default host, which the SDK reads off
+/// the shared `Configuration`. It redirects ordinary event ingestion too, so it is for demos only.
+private let demoServerURL = ProcessInfo.processInfo.environment["AMPLITUDE_SERVER_URL"]
+
 final class DemoAnalytics: ObservableObject {
     let plugin = StreamingAnalyticsPlugin()
     let activity = StreamActivityLog()
@@ -13,7 +17,9 @@ final class DemoAnalytics: ObservableObject {
     private let amplitude: Amplitude
 
     init() {
-        amplitude = Amplitude(configuration: Configuration(apiKey: demoAPIKey, logLevel: .debug))
+        amplitude = Amplitude(configuration: Configuration(apiKey: demoAPIKey,
+                                                           logLevel: .debug,
+                                                           serverUrl: demoServerURL))
         // Registered before the streaming plugin so it observes emitted stream events on the
         // `.before` timeline ahead of the delayed transport consuming them.
         amplitude.add(plugin: StreamActivityRecorder(log: activity))
