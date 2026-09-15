@@ -2,7 +2,9 @@ import AmplitudeSwift
 import AmplitudeVideoAnalytics
 import Foundation
 
-private let demoAPIKey = "DEMO-API-KEY"
+/// `AMPLITUDE_API_KEY` in the environment overrides this, so a real key reaches a real project
+/// without being committed. Xcode: set it on the VideoDemo scheme's Run action.
+private let demoAPIKey = ProcessInfo.processInfo.environment["AMPLITUDE_API_KEY"] ?? "DEMO-API-KEY"
 
 final class DemoAnalytics: ObservableObject {
     let plugin = StreamingAnalyticsPlugin()
