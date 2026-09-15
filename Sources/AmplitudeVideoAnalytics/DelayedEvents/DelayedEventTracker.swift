@@ -19,6 +19,7 @@ final class DelayedEventTracker {
     private var needsSend = false
     private var needsFlush = false
     private var requestInFlight = false
+    private var keepAlives: [BackgroundTask] = []
     private var timer: PulseTimer!
 
     init(amplitudeConfiguration: Configuration,
@@ -34,7 +35,9 @@ final class DelayedEventTracker {
         }
     }
 
-    func track(_ event: DelayedEvent) {
+    /// `sending` is the caller's decision, not the event's: the tracker admits the event either way
+    /// and only asks for a request when told. `forcePulse` is read by whoever owns the batch.
+    func track(_ event: DelayedEvent, sending: Bool) {
         guard let insertId = event.insertId, !insertId.isEmpty else {
             logger?.error(message: "DelayedEventTracker: insert_id is required on tracked events")
             return
@@ -42,25 +45,31 @@ final class DelayedEventTracker {
         queue.async {
             // An instant is never a refresh: sending it finalizes the live entry.
             if event.kind == .delayed, self.entries[insertId] != nil {
-                self.update(event, insertId: insertId)
+                self.update(event, insertId: insertId, sending: sending)
             } else {
-                self.add(event, insertId: insertId)
+                self.add(event, insertId: insertId, sending: sending)
             }
         }
     }
 
-    private func update(_ event: DelayedEvent, insertId: String) {
+    private func update(_ event: DelayedEvent, insertId: String, sending: Bool) {
         // A rejected refresh leaves the live entry standing; no send, it rides the next pulse.
         guard let entry = admissibleEntry(event, insertId: insertId) else { return }
         entries.upsert(entry, for: insertId)
-        if event.forcePulse {
+        if sending {
             setNeedsSend()
         }
     }
 
-    /// Sends the live set without waiting for the pulse interval. Used at backgrounding.
+    /// Sends the live set without waiting for the pulse interval.
     func pulseNow() {
         queue.async { self.setNeedsSend() }
+    }
+
+    /// Parks an assertion so whichever request goes next carries it, without asking for that request.
+    /// Backgrounding claims one before the send it wants has been decided on.
+    func keepAwake(_ keepAlive: BackgroundTask) {
+        queue.async { self.keepAlives.append(keepAlive) }
     }
 
     func flush() {
@@ -81,11 +90,11 @@ final class DelayedEventTracker {
         }
     }
 
-    private func add(_ event: DelayedEvent, insertId: String) {
+    private func add(_ event: DelayedEvent, insertId: String, sending: Bool) {
         if let entry = admissibleEntry(event, insertId: insertId) {
             entries.upsert(entry, for: insertId)
             timer.resume()
-            if event.forcePulse {
+            if sending {
                 setNeedsSend()
             }
         } else {
@@ -117,6 +126,8 @@ final class DelayedEventTracker {
     private func reset() {
         needsSend = false
         needsFlush = false
+        // Nothing will be sent, so nothing needs the app awake.
+        keepAlives = []
         timer.suspend()
     }
 
@@ -127,7 +138,11 @@ final class DelayedEventTracker {
         // TODO: persist entries so in-flight events survive process death.
         // TODO: buffer changes and send on a size or time threshold; sending per change is a
         //       staging choice while the server-side integration is being landed.
-        httpClient.upload(body) { [weak self] result in
+        let keepAlives = self.keepAlives
+        self.keepAlives = []
+        // Captured, not called: they end when this closure is released after the request settles.
+        httpClient.upload(body) { [weak self, keepAlives] result in
+            _ = keepAlives
             guard let self else { return }
             if case .failure(let error) = result {
                 self.logger?.error(message: "DelayedEventTracker: delayed events request failed: \(error)")
