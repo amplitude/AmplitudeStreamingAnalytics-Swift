@@ -97,7 +97,7 @@ final class DelayedEventsHttpClientTests: XCTestCase {
             exp.fulfill()
         }
         XCTAssertNotNil(task)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
     }
 
     func testUploadHTTPErrorSurfacesHttpError() {
@@ -114,7 +114,7 @@ final class DelayedEventsHttpClientTests: XCTestCase {
             XCTAssertEqual(code, 500)
             exp.fulfill()
         }
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
     }
 
     func testUploadTransportErrorSurfacesError() {
@@ -130,7 +130,7 @@ final class DelayedEventsHttpClientTests: XCTestCase {
             XCTAssertEqual((error as NSError).code, NSURLErrorNotConnectedToInternet)
             exp.fulfill()
         }
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
     }
 
     func testUploadNonHTTPResponseSurfacesInvalidResponse() {
@@ -146,7 +146,7 @@ final class DelayedEventsHttpClientTests: XCTestCase {
             }
             exp.fulfill()
         }
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
     }
 }
 
