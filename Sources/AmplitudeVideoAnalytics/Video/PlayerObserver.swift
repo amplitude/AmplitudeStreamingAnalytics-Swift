@@ -115,7 +115,6 @@ final class PlayerObserver {
         let playhead = player.playhead()
 
         let isValidPosition = playhead.position.isFinite && playhead.position >= 0
-        // Zero is a length, not an absence: `nil` is what means unknown, and the emitter already handles zero.
         let isValidDuration = playhead.duration.map { $0.isFinite && $0 >= 0 } ?? true
 
         if !isValidPosition { report("an invalid position \(playhead.position)") }
