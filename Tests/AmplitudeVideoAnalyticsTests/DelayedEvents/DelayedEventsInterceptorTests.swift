@@ -7,6 +7,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
     // Held for the test's lifetime: the interceptor retains the facade only weakly.
     private var amplitude: Amplitude!
     private var delayedEvents: DelayedEvents!
+    private let notifications = NotificationCenter()
 
     override func setUp() {
         super.setUp()
@@ -180,8 +181,28 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         let tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
                                           configuration: configuration,
                                           httpClient: uploader)
-        delayedEvents = DelayedEvents(amplitude: amplitude, configuration: configuration, tracker: tracker)
+        delayedEvents = DelayedEvents(amplitude: amplitude,
+                                      configuration: configuration,
+                                      tracker: tracker,
+                                      notifications: notifications)
     }
+
+#if (os(iOS) || os(tvOS) || os(visionOS) || targetEnvironment(macCatalyst)) && !AMPLITUDE_DISABLE_UIKIT
+    /// The pulse interval is an hour, so only backgrounding can produce the second request. The event
+    /// is already settled in the live set, which is all this send promises: an event still crossing
+    /// the timeline is not waited for, by design.
+    func testBackgroundingSendsTheLiveSetWithoutWaitingForThePulse() {
+        makeFacade(configuration: DelayedEventsConfiguration(pulseInterval: 3_600))
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed), forcePulse: true)
+        waitForUploads(1)
+
+        notifications.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+
+        waitForUploads(2)
+        XCTAssertEqual(uploader.bodies[1].events.compactMap(\.insertId), ["ins-1"])
+        XCTAssertNotEqual(uploader.bodies[1].ttlMs, 0, "nothing is finalized")
+    }
+#endif
 
     private func makeEvent(_ insertId: String, type: String = "Content Stopped") -> BaseEvent {
         let event = BaseEvent(eventType: type)
