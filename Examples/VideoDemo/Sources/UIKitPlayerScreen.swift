@@ -1,3 +1,4 @@
+import AmplitudeVideoAnalytics
 import AVKit
 import SwiftUI
 import UIKit
@@ -5,12 +6,16 @@ import UIKit
 /// UIKit tab: wraps `UIKitPlayerViewController` for hosting inside the
 /// SwiftUI `TabView`.
 struct UIKitPlayerScreen: UIViewControllerRepresentable {
+    @EnvironmentObject private var analytics: DemoAnalytics
+
     func makeUIViewController(context: Context) -> UIKitPlayerViewController {
-        UIKitPlayerViewController()
+        let controller = UIKitPlayerViewController()
+        controller.plugin = analytics.plugin
+        return controller
     }
 
     func updateUIViewController(_ uiViewController: UIKitPlayerViewController, context: Context) {
-        // No dynamic updates needed for this demo screen.
+        uiViewController.plugin = analytics.plugin
     }
 }
 
@@ -19,6 +24,7 @@ struct UIKitPlayerScreen: UIViewControllerRepresentable {
 /// `AVPlayer` is owned by this controller and torn down once the player is
 /// dismissed.
 final class UIKitPlayerViewController: UIViewController {
+    var plugin: StreamingAnalyticsPlugin?
     private var player: AVPlayer?
 
     override func viewDidLoad() {
@@ -72,7 +78,14 @@ final class UIKitPlayerViewController: UIViewController {
             self?.teardownPlayer()
         }
 
-        // TODO(video-analytics): plugin.trackVideo(player: player, options: ...)
+        plugin?.trackVideo(
+            player: player,
+            options: VideoTrackingOptions(
+                contentId: "bipbop-4x3",
+                title: "BipBop (UIKit)",
+                deliveryMode: .onDemand
+            )
+        )
 
         present(playerViewController, animated: true) {
             player.play()
@@ -80,7 +93,9 @@ final class UIKitPlayerViewController: UIViewController {
     }
 
     private func teardownPlayer() {
-        player?.pause()
-        player = nil
+        guard let player else { return }
+        player.pause()
+        plugin?.stopTracking(player: player)
+        self.player = nil
     }
 }

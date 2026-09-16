@@ -3,15 +3,20 @@ import SwiftUI
 
 @main
 struct VideoDemoApp: App {
+    @StateObject private var analytics = DemoAnalytics()
+
     var body: some Scene {
         WindowGroup {
             RootTabView()
+                .environmentObject(analytics)
         }
     }
 }
 
-/// Root tab container hosting the SwiftUI and UIKit playback demo screens.
+/// Root tab container hosting the SwiftUI and UIKit playback demo screens plus the activity panel.
 struct RootTabView: View {
+    @EnvironmentObject private var analytics: DemoAnalytics
+
     var body: some View {
         TabView {
             SwiftUIPlayerScreen()
@@ -22,6 +27,11 @@ struct RootTabView: View {
             UIKitPlayerScreen()
                 .tabItem {
                     Label("UIKit", systemImage: "uiwindow.split.2x1")
+                }
+
+            StreamActivityView(log: analytics.activity)
+                .tabItem {
+                    Label("Activity", systemImage: "waveform.path.ecg")
                 }
         }
     }
