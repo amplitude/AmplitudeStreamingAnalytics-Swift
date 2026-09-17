@@ -16,12 +16,12 @@ let package = Package(
         .target(
             name: "AmplitudeStreamingAnalytics",
             dependencies: [.product(name: "AmplitudeSwift", package: "Amplitude-Swift")],
-            path: "Sources/AmplitudeVideoAnalytics"
+            path: "Sources/AmplitudeStreamingAnalytics"
         ),
         .testTarget(
             name: "AmplitudeStreamingAnalyticsTests",
             dependencies: [.target(name: "AmplitudeStreamingAnalytics")],
-            path: "Tests/AmplitudeVideoAnalyticsTests"
+            path: "Tests/AmplitudeStreamingAnalyticsTests"
         ),
     ]
 )

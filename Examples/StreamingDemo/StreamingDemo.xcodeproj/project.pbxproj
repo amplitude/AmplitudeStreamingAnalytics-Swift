@@ -13,16 +13,16 @@
 		71107AF51305F4272B5C6B6E /* PlayerPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7DE37778FF2D4FA6E02CBA1 /* PlayerPresentation.swift */; };
 		84FC5A6DFEA6D8210F0EAC9B /* SwiftUIPlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3838B924358E6DA4641116 /* SwiftUIPlayerScreen.swift */; };
 		96252FEDEF732970A177AD63 /* AmplitudeStreamingAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = E9DFDC30826F02FD94689616 /* AmplitudeStreamingAnalytics */; };
-		B7D73D1421A9E0DD40D5258A /* VideoDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62713690E12F87C92FE3A6BA /* VideoDemoApp.swift */; };
+		B7D73D1421A9E0DD40D5258A /* StreamingDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62713690E12F87C92FE3A6BA /* StreamingDemoApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		30DA46E82D86B64795D658BF /* UIKitPlayerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKitPlayerScreen.swift; sourceTree = "<group>"; };
 		DE304A0000000000000000A1 /* DemoAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoAnalytics.swift; sourceTree = "<group>"; };
 		DE304A0000000000000000B1 /* StreamActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamActivityView.swift; sourceTree = "<group>"; };
-		62713690E12F87C92FE3A6BA /* VideoDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoDemoApp.swift; sourceTree = "<group>"; };
-		863FD8BC411ACD0BDEB76521 /* AmplitudeVideo-Swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "AmplitudeVideo-Swift"; path = ../..; sourceTree = SOURCE_ROOT; };
-		A2D915CB446A0FEEFFEF140F /* VideoDemo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VideoDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		62713690E12F87C92FE3A6BA /* StreamingDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingDemoApp.swift; sourceTree = "<group>"; };
+		863FD8BC411ACD0BDEB76521 /* AmplitudeStreamingAnalytics-Swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "AmplitudeStreamingAnalytics-Swift"; path = ../..; sourceTree = SOURCE_ROOT; };
+		A2D915CB446A0FEEFFEF140F /* StreamingDemo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = StreamingDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA3838B924358E6DA4641116 /* SwiftUIPlayerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftUIPlayerScreen.swift; sourceTree = "<group>"; };
 		E7DE37778FF2D4FA6E02CBA1 /* PlayerPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerPresentation.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -47,7 +47,7 @@
 				DE304A0000000000000000B1 /* StreamActivityView.swift */,
 				AA3838B924358E6DA4641116 /* SwiftUIPlayerScreen.swift */,
 				30DA46E82D86B64795D658BF /* UIKitPlayerScreen.swift */,
-				62713690E12F87C92FE3A6BA /* VideoDemoApp.swift */,
+				62713690E12F87C92FE3A6BA /* StreamingDemoApp.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -55,7 +55,7 @@
 		6C049DA7D8452185B4C56CE0 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A2D915CB446A0FEEFFEF140F /* VideoDemo.app */,
+				A2D915CB446A0FEEFFEF140F /* StreamingDemo.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -72,7 +72,7 @@
 		D2324695D874DBC2BDE07B19 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				863FD8BC411ACD0BDEB76521 /* AmplitudeVideo-Swift */,
+				863FD8BC411ACD0BDEB76521 /* AmplitudeStreamingAnalytics-Swift */,
 			);
 			name = Packages;
 			sourceTree = "<group>";
@@ -80,9 +80,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		81EC38B3756CCF0E4F5FD0AB /* VideoDemo */ = {
+		81EC38B3756CCF0E4F5FD0AB /* StreamingDemo */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B374FA32E161FBDA07C01324 /* Build configuration list for PBXNativeTarget "VideoDemo" */;
+			buildConfigurationList = B374FA32E161FBDA07C01324 /* Build configuration list for PBXNativeTarget "StreamingDemo" */;
 			buildPhases = (
 				9A60A84ABC26A58E4E83C7CB /* Sources */,
 				9E427ED5500711B4E8FCE29A /* Frameworks */,
@@ -91,12 +91,12 @@
 			);
 			dependencies = (
 			);
-			name = VideoDemo;
+			name = StreamingDemo;
 			packageProductDependencies = (
 				E9DFDC30826F02FD94689616 /* AmplitudeStreamingAnalytics */,
 			);
-			productName = VideoDemo;
-			productReference = A2D915CB446A0FEEFFEF140F /* VideoDemo.app */;
+			productName = StreamingDemo;
+			productReference = A2D915CB446A0FEEFFEF140F /* StreamingDemo.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -108,7 +108,7 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 			};
-			buildConfigurationList = 3F20F8E187A7CA60C3AA77B1 /* Build configuration list for PBXProject "VideoDemo" */;
+			buildConfigurationList = 3F20F8E187A7CA60C3AA77B1 /* Build configuration list for PBXProject "StreamingDemo" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -125,7 +125,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				81EC38B3756CCF0E4F5FD0AB /* VideoDemo */,
+				81EC38B3756CCF0E4F5FD0AB /* StreamingDemo */,
 			);
 		};
 /* End PBXProject section */
@@ -140,7 +140,7 @@
 				DE304A0000000000000000B2 /* StreamActivityView.swift in Sources */,
 				84FC5A6DFEA6D8210F0EAC9B /* SwiftUIPlayerScreen.swift in Sources */,
 				32535F02EA3E2DE88882F750 /* UIKitPlayerScreen.swift in Sources */,
-				B7D73D1421A9E0DD40D5258A /* VideoDemoApp.swift in Sources */,
+				B7D73D1421A9E0DD40D5258A /* StreamingDemoApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -209,14 +209,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = VideoDemo;
+				INFOPLIST_KEY_CFBundleDisplayName = StreamingDemo;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.amplitude.VideoDemo;
+				PRODUCT_BUNDLE_IDENTIFIER = com.amplitude.StreamingDemo;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -292,14 +292,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = VideoDemo;
+				INFOPLIST_KEY_CFBundleDisplayName = StreamingDemo;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.amplitude.VideoDemo;
+				PRODUCT_BUNDLE_IDENTIFIER = com.amplitude.StreamingDemo;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -309,7 +309,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		3F20F8E187A7CA60C3AA77B1 /* Build configuration list for PBXProject "VideoDemo" */ = {
+		3F20F8E187A7CA60C3AA77B1 /* Build configuration list for PBXProject "StreamingDemo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				DD72CE3FF74242FDFEF19CDA /* Debug */,
@@ -318,7 +318,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		B374FA32E161FBDA07C01324 /* Build configuration list for PBXNativeTarget "VideoDemo" */ = {
+		B374FA32E161FBDA07C01324 /* Build configuration list for PBXNativeTarget "StreamingDemo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				D4986479D500CD44BE26387F /* Debug */,

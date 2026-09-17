@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "81EC38B3756CCF0E4F5FD0AB"
-               BuildableName = "VideoDemo.app"
-               BlueprintName = "VideoDemo"
-               ReferencedContainer = "container:VideoDemo.xcodeproj">
+               BuildableName = "StreamingDemo.app"
+               BlueprintName = "StreamingDemo"
+               ReferencedContainer = "container:StreamingDemo.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -33,9 +33,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "81EC38B3756CCF0E4F5FD0AB"
-            BuildableName = "VideoDemo.app"
-            BlueprintName = "VideoDemo"
-            ReferencedContainer = "container:VideoDemo.xcodeproj">
+            BuildableName = "StreamingDemo.app"
+            BlueprintName = "StreamingDemo"
+            ReferencedContainer = "container:StreamingDemo.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -58,9 +58,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "81EC38B3756CCF0E4F5FD0AB"
-            BuildableName = "VideoDemo.app"
-            BlueprintName = "VideoDemo"
-            ReferencedContainer = "container:VideoDemo.xcodeproj">
+            BuildableName = "StreamingDemo.app"
+            BlueprintName = "StreamingDemo"
+            ReferencedContainer = "container:StreamingDemo.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>
@@ -77,9 +77,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "81EC38B3756CCF0E4F5FD0AB"
-            BuildableName = "VideoDemo.app"
-            BlueprintName = "VideoDemo"
-            ReferencedContainer = "container:VideoDemo.xcodeproj">
+            BuildableName = "StreamingDemo.app"
+            BlueprintName = "StreamingDemo"
+            ReferencedContainer = "container:StreamingDemo.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

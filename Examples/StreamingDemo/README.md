@@ -1,4 +1,4 @@
-# VideoDemo
+# StreamingDemo
 
 An example app exercising `AmplitudeStreamingAnalytics` end to end. It has three tabs:
 a SwiftUI player, a UIKit player (both playing Apple's public HLS demo stream), and an
@@ -13,5 +13,5 @@ real project key to see events land in a project.
 
 ## Run
 
-Open `Examples/VideoDemo/VideoDemo.xcodeproj` in Xcode, select the `VideoDemo`
+Open `Examples/StreamingDemo/StreamingDemo.xcodeproj` in Xcode, select the `StreamingDemo`
 scheme, and run on any iOS 16+ simulator or device.
