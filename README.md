@@ -45,5 +45,5 @@ amplitude.add(plugin: streaming)
 streaming.trackPlayer(player: avPlayer, content: PlayerContent(contentId: "ep-1", title: "Episode 1"))
 ```
 
-See [`docs/`](https://amplitude.com/docs) for the full reference; the docsite is the source of
-truth from GA.
+See [`docs/`](docs/) for the full reference. It will move to
+[the Amplitude docsite](https://amplitude.com/docs), the source of truth from GA.
