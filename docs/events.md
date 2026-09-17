@@ -61,7 +61,7 @@ Sent when the player stops playing: a pause, the end of the item, an error, or y
 `stopTracking(player:)` on a player that is already paused sends nothing, because the pause
 already closed that play.
 
-A play that never closes also produces one, with `stop_reason` `timeout`. See the note below.
+A play that never closes reaches your data with `stop_reason` `timeout` instead. See the note below.
 
 It carries every property `[Amplitude] Stream Started` carries, plus:
 
@@ -75,9 +75,9 @@ It carries every property `[Amplitude] Stream Started` carries, plus:
 Watch the scope difference between the two: `start_time` belongs to the current play, while
 `stream_duration` covers the whole viewing.
 
-> **Note:** `stop_reason` `timeout` means the play never closed
+> **Note:** `stop_reason` `timeout` marks a play that never closed
 >
-> `paused`, `ended`, `error` and `untracked` each say what stopped the play. `timeout` says the SDK never got to send a closing event, because the app crashed, was force-quit, or lost the network first. The event still reports the `position` and `stream_duration` the play had reached. These rows mark the viewings that ended badly, so keep them.
+> `paused`, `ended`, `error` and `untracked` each say what stopped the play. A `timeout` reaches your data when no closing event ever arrived, because the app crashed, was force-quit, or lost the network first. The event still reports the `position` and `stream_duration` the play had reached. These rows mark the viewings that ended badly, so keep them.
 
 ## Known limitations
 
