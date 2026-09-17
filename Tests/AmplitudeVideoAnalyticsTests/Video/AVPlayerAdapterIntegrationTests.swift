@@ -106,7 +106,10 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         let seekEvents = EventRecorder()
         let seeked = expectation(description: "seeked")
         sut.startObserving { event in
-            if event == .seeking || event == .seeked { seekEvents.record(event) }
+            switch event {
+            case .seeking, .seeked: seekEvents.record(event)
+            default: break
+            }
             if event == .seeked { seeked.fulfill() }
         }
         addTeardownBlock { sut.stopObserving() }
@@ -189,7 +192,10 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
         let paused = expectation(description: "paused")
         paused.assertForOverFulfill = false
         sut.startObserving { event in
-            if event == .seeking || event == .seeked { seekEvents.record(event) }
+            switch event {
+            case .seeking, .seeked: seekEvents.record(event)
+            default: break
+            }
             if event == .paused { paused.fulfill() }
         }
         addTeardownBlock { sut.stopObserving() }

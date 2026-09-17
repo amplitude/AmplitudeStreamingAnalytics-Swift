@@ -19,7 +19,7 @@ final class PlayerObserverConcurrencyTests: XCTestCase {
                         switch (worker + step) % 5 {
                         case 0: harness.player.fire(.played)
                         case 1: harness.player.fire(.paused)
-                        case 2: harness.player.fire(.seeking)
+                        case 2: harness.player.fire(.seeking(from: harness.player.playhead()))
                         case 3: harness.queue.async { harness.tick() }
                         default: harness.player.fire(.ended)
                         }

@@ -15,7 +15,8 @@ enum PlayerEvent: Equatable {
     /// Playback stopped without reaching the end. Not for buffering.
     case paused
     /// Optional, only before the playhead moves: makes watch time exact. Free to repeat; any other event ends it.
-    case seeking
+    /// `from` is the playhead as it was before the seek started.
+    case seeking(from: Playhead)
     /// The playhead moved by something other than playing. Required if your player can seek, or the SDK
     /// counts the jump as watched.
     case seeked

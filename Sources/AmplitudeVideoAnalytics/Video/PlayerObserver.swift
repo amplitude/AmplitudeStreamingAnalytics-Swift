@@ -58,13 +58,13 @@ final class PlayerObserver {
     /// The pulse's tick: one reading, booked while playing.
     private func refresh() {
         guard state.phase == .playing else { return }
-        commit(read())
+        commit(playerState())
     }
 
     /// Idempotent.
     func finish() {
         guard state.phase != .final else { return }
-        endViewing(closing: .untracked, at: read())
+        endViewing(closing: .untracked, at: playerState())
     }
 
     private func handle(_ event: PlayerEvent) {
@@ -72,9 +72,10 @@ final class PlayerObserver {
         // Hoisted so no transition below can return before an error is logged.
         if case .error(let message) = event { report("an error: \(message ?? "no message")") }
         // A released player is never read: it answers from a cache at best and with garbage at worst.
-        let next = event == .released ? state : read(accruing: event != .seeked)
+        let next = event == .released ? state : playerState(after: event)
         // Only `.seeking` is promised to predate its jump, so only it books; readings after it land past one.
-        isSeeking = event == .seeking
+        let wasSeeking = isSeeking
+        isSeeking = event.seekingFrom != nil
         switch event {
         case .played where state.phase != .playing:
             commit(next.with { $0.phase = .playing })
@@ -91,7 +92,8 @@ final class PlayerObserver {
         case .released:
             endViewing(closing: .untracked, at: next)
         case .played, .paused, .ended:
-            ignore(event)
+            // The seek ended here too, so its non-accruing reading must land or the next pulse books the jump.
+            if wasSeeking { commit(next) } else { ignore(event) }
         }
     }
 
@@ -111,8 +113,9 @@ final class PlayerObserver {
     }
 
     /// The vetted playhead applied to `state`; while playing, its advance is booked as watch time.
-    private func read(accruing: Bool = true) -> PlayerState {
-        let playhead = player.playhead()
+    private func playerState(after event: PlayerEvent? = nil) -> PlayerState {
+        let playhead = event.flatMap(\.seekingFrom) ?? player.playhead()
+        let accruing = event != .seeked
 
         let isValidPosition = playhead.position.isFinite && playhead.position >= 0
         let isValidDuration = playhead.duration.map { $0.isFinite && $0 >= 0 } ?? true
@@ -136,5 +139,12 @@ final class PlayerObserver {
     /// The one place anything the player got wrong is logged.
     private func report(_ problem: String) {
         logger?.error(message: "PlayerObserver: the player reported \(problem)")
+    }
+}
+
+private extension PlayerEvent {
+    var seekingFrom: Playhead? {
+        if case .seeking(let from) = self { return from }
+        return nil
     }
 }
