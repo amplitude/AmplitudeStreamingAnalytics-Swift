@@ -90,11 +90,6 @@ playback.
 >
 > You do not have to call `stopTracking(player:)` when a screen goes away. The SDK holds the `AVPlayer` weakly and ends the viewing when the player deallocates, sending the same closing event an explicit `stopTracking(player:)` would.
 
-## What is fixed in Alpha
-
-The sample interval and the delayed-event TTL live in `StreamingAnalyticsConfig`, which is internal.
-The Alpha ships them as fixed defaults on purpose; `PlayerContent` is the only thing you configure.
-
 ## Known limitations
 
 - Give the player an item before you track it. `trackPlayer(player:content:)` looks at

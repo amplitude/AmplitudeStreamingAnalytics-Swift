@@ -5,7 +5,6 @@ let package = Package(
     name: "AmplitudeStreamingAnalytics-Swift",
     platforms: [.iOS("13.0"), .tvOS("13.0"), .macOS("10.15")],
     products: [
-        // Single target/module: CocoaPods distribution is planned (one pod = one module).
         // DelayedEvents/ stays extractable via the CI-guarded directory boundary.
         .library(name: "AmplitudeStreamingAnalytics", targets: ["AmplitudeStreamingAnalytics"])
     ],

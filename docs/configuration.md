@@ -71,8 +71,3 @@ quietly:
   event intact, because the SDK sets them only on Stopped events. The same key then means one
   thing on your Started events and another on your Stopped events, in the same viewing, with no
   error to tell you.
-
-## What you cannot configure
-
-The sample interval and the delayed-event TTL live in `StreamingAnalyticsConfig`, which is
-internal. The Alpha ships them as fixed defaults on purpose.
