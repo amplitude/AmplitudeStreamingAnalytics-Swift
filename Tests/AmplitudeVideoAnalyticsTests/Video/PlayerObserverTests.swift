@@ -81,7 +81,7 @@ final class PlayerObserverTests: XCTestCase {
             harness.play(5)
             harness.refresh()
             harness.play(0.5)                         // played on; no pulse has sampled this yet
-            if sendsSeeking { harness.handle(.seeking) }
+            if sendsSeeking { harness.handle(.seeking(from: harness.player.playhead())) }
             harness.player.position = 60              // the jump
             harness.handle(.seeked)
             harness.play(2)
@@ -101,9 +101,9 @@ final class PlayerObserverTests: XCTestCase {
         harness.handle(.played)
         harness.play(5)
         harness.refresh()
-        harness.handle(.seeking)                      // pre-jump reading, at 5
-        harness.player.position = 60                  // the first jump lands
-        harness.handle(.seeking)                      // still scrubbing: pre-jump for the second seek, at 60
+        harness.handle(.seeking(from: harness.player.playhead()))   // pre-jump, at 5
+        harness.player.position = 60                                // the first jump lands
+        harness.handle(.seeking(from: harness.player.playhead()))   // still scrubbing: pre-jump for the second, at 60
         harness.player.position = 90
         harness.handle(.seeked)
         harness.play(2)
@@ -123,7 +123,7 @@ final class PlayerObserverTests: XCTestCase {
         harness.handle(.played)
         harness.play(5)
         harness.refresh()
-        harness.handle(.seeking)
+        harness.handle(.seeking(from: harness.player.playhead()))
         harness.player.position = 60
         harness.refresh()
 
@@ -145,7 +145,7 @@ final class PlayerObserverTests: XCTestCase {
     func testASeekBeforeTheFirstPlayPublishesNothingAndCostsNothing() {
         let harness = PlayerObserverHarness(label: "seek-before-play")
         harness.player.position = 60
-        harness.handle(.seeking)
+        harness.handle(.seeking(from: harness.player.playhead()))
         harness.handle(.seeked)
 
         XCTAssertTrue(harness.states.isEmpty, "no .idle payload reaches the consumer")
@@ -165,7 +165,7 @@ final class PlayerObserverTests: XCTestCase {
         harness.handle(.played)
         harness.play(5)
         harness.refresh()
-        harness.handle(.seeking)
+        harness.handle(.seeking(from: harness.player.playhead()))
         harness.player.position = 60
         harness.handle(.paused)                       // lands before `.seeked` ever does
 
@@ -176,6 +176,46 @@ final class PlayerObserverTests: XCTestCase {
         harness.play(3)
         harness.refresh()
         XCTAssertEqual(harness.last?.watchTime, 8, "the pause ended the seek; accrual resumed")
+    }
+
+    /// `.seeking` is answered from the playhead it carries, so a player that seeks the instant it emits — legal,
+    /// the contract only asks that `.seeking` be sent first — still measures exactly. Reading the player back
+    /// after the event hopped onto the queue booked the whole jump: 62s for a viewing that watched 7.5s.
+    func testSeekingIsAnsweredFromItsPayloadEvenWhenThePlayerMovesAtOnce() {
+        let harness = PlayerObserverHarness(label: "seek-carried")
+        harness.handle(.played)
+        harness.play(5)
+        harness.refresh()
+
+        harness.play(0.5)
+        harness.player.fire(.seeking(from: harness.player.playhead()))  // fired, not yet handled
+        harness.player.position = 60                                    // it moves before the queue runs
+        harness.drain()
+
+        harness.handle(.seeked)
+        harness.play(2)
+        harness.refresh()
+
+        XCTAssertEqual(harness.last?.watchTime, 7.5, "the jump is not booked; the 0.5s before it is")
+    }
+
+    /// An event the phase drops still ends the seek, so it has to publish its re-based position too. Dropping
+    /// it left `state` behind the jump with the seek closed, and the next pulse booked the whole jump.
+    func testAnIgnoredEventEndsTheSeekAndStillRebases() {
+        let harness = PlayerObserverHarness(label: "seek-ignored")
+        harness.handle(.played)
+        harness.play(5)
+        harness.refresh()
+        harness.handle(.seeking(from: harness.player.playhead()))
+        harness.player.position = 60
+        harness.handle(.played)                       // already playing: no transition, but the seek is over
+
+        XCTAssertEqual(harness.last?.position, 60, "the jump landed in the published state")
+        XCTAssertEqual(harness.last?.watchTime, 5, "and cost nothing")
+
+        harness.play(2)
+        harness.refresh()
+        XCTAssertEqual(harness.last?.watchTime, 7, "the next tick books only what played after the jump")
     }
 
     func testSeekedWhileStoppedRebasesWithoutBooking() {
