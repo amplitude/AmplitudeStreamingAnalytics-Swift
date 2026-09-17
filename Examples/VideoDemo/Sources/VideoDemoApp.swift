@@ -1,8 +1,8 @@
-import AmplitudeVideoAnalytics
+import AmplitudeStreamingAnalytics
 import SwiftUI
 
 @main
-struct VideoDemoApp: App {
+struct StreamingDemoApp: App {
     @StateObject private var analytics = DemoAnalytics()
 
     var body: some Scene {

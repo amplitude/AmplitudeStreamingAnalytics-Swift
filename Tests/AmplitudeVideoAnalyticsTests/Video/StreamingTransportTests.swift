@@ -1,7 +1,7 @@
 import XCTest
 import AmplitudeSwift
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 /// Observer and transformer wired to a real `DelayedEventTracker`: what a play/pause puts on the wire.
 final class StreamingTransportTests: XCTestCase {
@@ -16,7 +16,7 @@ final class StreamingTransportTests: XCTestCase {
                                                                                     ttlMs: 3_600_000),
                                           httpClient: uploader)
         let harness = PlayerObserverHarness(label: "forwarded")
-        let transformer = PlayerStateTransformer(options: VideoTrackingOptions(contentId: "ep-1"))
+        let transformer = PlayerStateTransformer(content: PlayerContent(contentId: "ep-1"))
         let at = Date(timeIntervalSince1970: 1_752_000_000)
         harness.onEveryState { state in
             transformer.events(for: state, at: at).forEach { tracker.track($0) }
@@ -73,7 +73,7 @@ final class StreamingTransportTests: XCTestCase {
                                           configuration: DelayedEventsConfiguration(pulseInterval: 600,
                                                                                     ttlMs: 3_600_000),
                                           httpClient: uploader)
-        let transformer = PlayerStateTransformer(options: VideoTrackingOptions(contentId: "ep-1"))
+        let transformer = PlayerStateTransformer(content: PlayerContent(contentId: "ep-1"))
         let state = PlayerState(phase: .playing, position: 0, duration: 100, watchTime: 0)
         let opening = transformer.events(for: state, at: Date(timeIntervalSince1970: 1_752_000_000))
 

@@ -3,7 +3,7 @@ import CoreVideo
 import Foundation
 import XCTest
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 // Scope: unlike `AVPlayerAdapterTests` (bare AVPlayer), this drives a REAL `AVPlayer` against a
 // REAL, locally-generated H.264 asset to prove the adapter emits `PlayerEvent`s end-to-end.

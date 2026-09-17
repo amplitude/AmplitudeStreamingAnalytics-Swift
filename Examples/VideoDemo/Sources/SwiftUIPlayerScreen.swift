@@ -1,4 +1,4 @@
-import AmplitudeVideoAnalytics
+import AmplitudeStreamingAnalytics
 import AVKit
 import SwiftUI
 
@@ -17,9 +17,9 @@ struct SwiftUIPlayerScreen: View {
                 guard !isTracked else { return }
                 isTracked = true
 
-                analytics.plugin.trackVideo(
+                analytics.plugin.trackPlayer(
                     player: player,
-                    options: VideoTrackingOptions(
+                    content: PlayerContent(
                         contentId: "bipbop-4x3",
                         title: "BipBop (SwiftUI)",
                         deliveryMode: .onDemand

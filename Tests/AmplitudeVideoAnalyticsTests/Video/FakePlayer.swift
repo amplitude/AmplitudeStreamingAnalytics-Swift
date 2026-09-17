@@ -1,6 +1,6 @@
 import Foundation
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 /// Scriptable `Player`. The lock is for the tests, not the contract: `Player` promises nothing about threads;
 /// tests script the player from the XCTest thread and fire events from others, so the fake's storage must survive that.

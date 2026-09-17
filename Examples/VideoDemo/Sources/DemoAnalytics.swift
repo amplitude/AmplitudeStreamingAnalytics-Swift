@@ -1,9 +1,9 @@
 import AmplitudeSwift
-import AmplitudeVideoAnalytics
+import AmplitudeStreamingAnalytics
 import Foundation
 
 /// `AMPLITUDE_API_KEY` in the environment overrides this, so a real key reaches a real project
-/// without being committed. Xcode: set it on the VideoDemo scheme's Run action.
+/// without being committed. Xcode: set it on the StreamingDemo scheme's Run action.
 private let demoAPIKey = ProcessInfo.processInfo.environment["AMPLITUDE_API_KEY"] ?? "DEMO-API-KEY"
 
 /// `AMPLITUDE_SERVER_URL` points the delayed transport at a non-default host, which the SDK reads off

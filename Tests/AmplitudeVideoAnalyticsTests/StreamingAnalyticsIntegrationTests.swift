@@ -1,7 +1,7 @@
 import XCTest
 import AmplitudeSwift
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 /// Real Amplitude timeline, real plugin + facade + tracker; only HTTP and the player are fake.
 final class StreamingAnalyticsIntegrationTests: XCTestCase {
@@ -22,7 +22,7 @@ final class StreamingAnalyticsIntegrationTests: XCTestCase {
 
         let player = FakePlayer()
         player.duration = 100
-        plugin.trackVideo(player: player, options: VideoTrackingOptions(contentId: "ep-1", deliveryMode: .onDemand))
+        plugin.trackPlayer(player: player, content: PlayerContent(contentId: "ep-1", deliveryMode: .onDemand))
         player.fire(.played)
         // Wait for the play's own request to land before pausing, so the timeout snapshot
         // is not overwritten in place by the paused final before either is ever sent.

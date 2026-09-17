@@ -1,7 +1,7 @@
 import AVFoundation
 import XCTest
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 // Scope: bare AVPlayer only (no item, no media); playback-driven events are covered by the integration tests.
 final class AVPlayerAdapterTests: XCTestCase {

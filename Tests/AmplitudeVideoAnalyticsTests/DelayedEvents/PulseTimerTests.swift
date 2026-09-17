@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 /// Thread-safe fire counter shared between the timer's dispatch queue and the test thread.
 final class PulseTimerFireCounter {

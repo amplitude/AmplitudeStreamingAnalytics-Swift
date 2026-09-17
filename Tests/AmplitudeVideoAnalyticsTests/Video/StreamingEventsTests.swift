@@ -1,13 +1,13 @@
 import XCTest
 import AmplitudeSwift
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 final class StreamingEventsTests: XCTestCase {
     private let at = Date(timeIntervalSince1970: 1_752_000_000)
 
     func testStartedCarriesIdentityAndPosition() {
-        let event = StreamingEvents.started(options: VideoTrackingOptions(contentId: "ep-1", title: "Ep 1", deliveryMode: .onDemand),
+        let event = StreamingEvents.started(content: PlayerContent(contentId: "ep-1", title: "Ep 1", deliveryMode: .onDemand),
                                             state: state(position: 10, duration: 100, insertId: "start-1"))
 
         XCTAssertEqual(event.eventType, "[Amplitude] Stream Started")
@@ -29,7 +29,7 @@ final class StreamingEventsTests: XCTestCase {
     }
 
     func testStoppedCarriesProgressAndReason() {
-        let event = StreamingEvents.stopped(options: VideoTrackingOptions(contentId: "ep-1", deliveryMode: .onDemand),
+        let event = StreamingEvents.stopped(content: PlayerContent(contentId: "ep-1", deliveryMode: .onDemand),
                                             state: state(position: 25, duration: 100, streamDuration: 20, reason: .paused))
 
         XCTAssertEqual(event.eventType, "[Amplitude] Stream Stopped")
@@ -43,7 +43,7 @@ final class StreamingEventsTests: XCTestCase {
     }
 
     func testStoppedWithErrorCarriesMessage() {
-        let event = StreamingEvents.stopped(options: VideoTrackingOptions(),
+        let event = StreamingEvents.stopped(content: PlayerContent(),
                                             state: state(position: 5, duration: 100, reason: .error, errorMessage: "boom"))
 
         XCTAssertEqual(event.eventProperties?["stop_reason"] as? String, "error")
@@ -52,11 +52,11 @@ final class StreamingEventsTests: XCTestCase {
 
     /// The lane follows the reason: only a `timeout` leaves the row open for a later refresh.
     func testTimeoutIsTheOnlyDelayedStop() {
-        XCTAssertEqual(StreamingEvents.stopped(options: VideoTrackingOptions(),
+        XCTAssertEqual(StreamingEvents.stopped(content: PlayerContent(),
                                                state: state(position: 5, duration: 100, reason: .timeout)).kind,
                        .delayed)
         for reason: StreamingStopReason in [.paused, .ended, .error, .untracked] {
-            XCTAssertEqual(StreamingEvents.stopped(options: VideoTrackingOptions(),
+            XCTAssertEqual(StreamingEvents.stopped(content: PlayerContent(),
                                                    state: state(position: 5, duration: 100, reason: reason)).kind,
                            .instant,
                            "\(reason.rawValue) finalizes the row")
@@ -64,7 +64,7 @@ final class StreamingEventsTests: XCTestCase {
     }
 
     func testLiveOmitsDurationAndPercentAndInfersDeliveryMode() {
-        let event = StreamingEvents.stopped(options: VideoTrackingOptions(contentId: "live-1"),
+        let event = StreamingEvents.stopped(content: PlayerContent(contentId: "live-1"),
                                             state: state(position: 5, duration: nil, reason: .timeout))
 
         let props = event.eventProperties!
@@ -74,18 +74,18 @@ final class StreamingEventsTests: XCTestCase {
     }
 
     func testPercentIsClampedAndZeroDurationIsSafe() {
-        let over = StreamingEvents.stopped(options: VideoTrackingOptions(),
+        let over = StreamingEvents.stopped(content: PlayerContent(),
                                            state: state(position: 150, duration: 100, reason: .ended))
         XCTAssertEqual(over.eventProperties?["percent_completed"] as? Double, 100)
 
-        let zero = StreamingEvents.stopped(options: VideoTrackingOptions(),
+        let zero = StreamingEvents.stopped(content: PlayerContent(),
                                            state: state(position: 5, duration: 0, reason: .ended))
         XCTAssertEqual(zero.eventProperties?["percent_completed"] as? Double, 0)
     }
 
     func testExtraPropertiesHaveLowestPrecedence() {
-        let options = VideoTrackingOptions(contentId: "real", extraEventProperties: ["content_id": "extra", "custom": 1])
-        let event = StreamingEvents.started(options: options, state: state(position: 0, duration: 10))
+        let options = PlayerContent(contentId: "real", extraEventProperties: ["content_id": "extra", "custom": 1])
+        let event = StreamingEvents.started(content: options, state: state(position: 0, duration: 10))
 
         XCTAssertEqual(event.eventProperties?["content_id"] as? String, "real")
         XCTAssertEqual(event.eventProperties?["custom"] as? Int, 1)

@@ -2,7 +2,7 @@ import AVFoundation
 import XCTest
 import AmplitudeSwift
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 final class StreamingAnalyticsPluginTests: XCTestCase {
     private var uploader: FakeDelayedEventsUploader!
@@ -46,7 +46,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
 
     func testPlayRoutesStartedToInstantAndSnapshotToDelayed() {
         let player = FakePlayer()
-        plugin.trackVideo(player: player, options: VideoTrackingOptions(contentId: "ep-1"))
+        plugin.trackPlayer(player: player, content: PlayerContent(contentId: "ep-1"))
         player.fire(.played)
 
         waitForUpload { $0.instantEvents?.contains { $0.eventType == StreamingEvents.startedType } == true }
@@ -58,7 +58,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
 
     func testPauseCarriesAccruedWatchDurationAndFinalizesTheRow() {
         let player = FakePlayer()
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
         player.fire(.played)
         waitForUpload { !$0.events.isEmpty }
 
@@ -110,7 +110,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         host.add(plugin: pulsed)
 
         let player = FakePlayer()
-        pulsed.trackVideo(player: player, options: VideoTrackingOptions())
+        pulsed.trackPlayer(player: player, content: PlayerContent())
         player.fire(.played)
 
         let opened = expectation(description: "the play opened the row")
@@ -135,11 +135,11 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
     /// being ended by a caller who only meant to start one.
     func testRetrackingTheSamePlayerIsRefusedAndLeavesTheViewingRunning() {
         let player = FakePlayer()
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
         player.fire(.played)
         waitForUpload { !$0.events.isEmpty }
 
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
 
         XCTAssertEqual(plugin.activeSessionCount, 1)
         XCTAssertEqual(player.startObservingCount, 1, "no second observer subscribed")
@@ -149,17 +149,17 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
     }
 
     /// The refusal is on a *live* viewing. One that ended on its own has already evicted itself — its `.final`
-    /// reaches the plugin on the same serial queue `trackVideo` uses — so the player can be tracked again.
+    /// reaches the plugin on the same serial queue `trackPlayer` uses — so the player can be tracked again.
     func testTrackingAgainAfterTheViewingEndedOnItsOwnIsAllowed() {
         let player = FakePlayer()
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
         player.fire(.played)
         waitForUpload { !$0.events.isEmpty }
 
         player.fire(.released)
         waitForUpload(matching: isUntrackedStop)
 
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
 
         XCTAssertEqual(plugin.activeSessionCount, 1, "the ended viewing evicted itself, so this one registered")
         XCTAssertEqual(player.startObservingCount, 2)
@@ -167,7 +167,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
 
     func testStopTrackingEndsTheViewing() {
         let player = FakePlayer()
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
         player.fire(.played)
         waitForUpload { !$0.events.isEmpty }
 
@@ -188,8 +188,8 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
     func testTwoPlayersAreTwoViewings() {
         let first = FakePlayer()
         let second = FakePlayer()
-        plugin.trackVideo(player: first, options: VideoTrackingOptions())
-        plugin.trackVideo(player: second, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: first, content: PlayerContent())
+        plugin.trackPlayer(player: second, content: PlayerContent())
         XCTAssertEqual(plugin.activeSessionCount, 2)
 
         first.fire(.played)
@@ -202,7 +202,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
 
     func testReleasedPlayerEndsItsViewing() {
         let player = FakePlayer()
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
         player.fire(.played)
         waitForUpload { !$0.events.isEmpty }
 
@@ -212,10 +212,10 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         XCTAssertEqual(plugin.activeSessionCount, 0)
     }
 
-    func testTrackVideoBeforeSetupIsInert() {
+    func testTrackPlayerBeforeSetupIsInert() {
         let detached = StreamingAnalyticsPlugin()
         let player = FakePlayer()
-        detached.trackVideo(player: player, options: VideoTrackingOptions())
+        detached.trackPlayer(player: player, content: PlayerContent())
         player.fire(.played)
 
         XCTAssertEqual(player.startObservingCount, 0, "nothing to track: the plugin was never added to an Amplitude instance")
@@ -259,7 +259,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
 
         host.add(plugin: integrator)
         let player = FakePlayer()
-        integrator.trackVideo(player: player, options: VideoTrackingOptions())
+        integrator.trackPlayer(player: player, content: PlayerContent())
 
         XCTAssertEqual(integrator.activeSessionCount, 1)
         XCTAssertEqual(player.startObservingCount, 1, "a live session: start() only observes while not final")
@@ -277,16 +277,16 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
 
     func testAVPlayerOverloadTracksThroughTheAdapter() {
         let player = AVPlayer()
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
         XCTAssertEqual(plugin.activeSessionCount, 1)
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
         XCTAssertEqual(plugin.activeSessionCount, 1, "re-tracking the same AVPlayer is refused")
         XCTAssertTrue(uploader.bodies.isEmpty, "no play, nothing sent")
     }
 
     func testDeinitFinalizesLiveSessions() {
         let player = FakePlayer()
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
         player.fire(.played)
         waitForUpload { !$0.events.isEmpty }
 

@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 /// Pure mapping from successive `PlayerState`s to wire events. No player, no queue.
 final class PlayerStateTransformerTests: XCTestCase {
@@ -9,7 +9,7 @@ final class PlayerStateTransformerTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        transformer = PlayerStateTransformer(options: VideoTrackingOptions(contentId: "ep-1"))
+        transformer = PlayerStateTransformer(content: PlayerContent(contentId: "ep-1"))
     }
 
     private func state(_ phase: PlayerState.Phase,

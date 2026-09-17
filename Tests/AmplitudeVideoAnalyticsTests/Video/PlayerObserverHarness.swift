@@ -1,7 +1,7 @@
 import AmplitudeSwift
 import Foundation
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 /// A `PlayerObserver` with its player, its queue, and a thread-safe record of every state it published.
 final class PlayerObserverHarness {

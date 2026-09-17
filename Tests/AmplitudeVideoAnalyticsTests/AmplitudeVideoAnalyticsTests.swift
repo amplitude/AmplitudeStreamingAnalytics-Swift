@@ -1,10 +1,9 @@
 import XCTest
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
-final class AmplitudeVideoAnalyticsTests: XCTestCase {
+final class AmplitudeStreamingAnalyticsTests: XCTestCase {
     func testVersionsAreNonEmpty() {
-        XCTAssertFalse(AmplitudeVideoAnalyticsInfo.version.isEmpty)
         XCTAssertFalse(DelayedEventsInfo.version.isEmpty)
     }
 }

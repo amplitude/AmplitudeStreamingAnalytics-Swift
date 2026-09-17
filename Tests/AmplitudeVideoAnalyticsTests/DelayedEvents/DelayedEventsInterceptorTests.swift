@@ -1,5 +1,5 @@
 import XCTest
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 import AmplitudeSwift
 
 final class DelayedEventsInterceptorTests: XCTestCase {

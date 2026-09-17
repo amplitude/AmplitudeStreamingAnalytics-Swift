@@ -7,7 +7,7 @@ public enum DeliveryMode: String {
 }
 
 /// Caller-supplied metadata describing the content being tracked.
-public struct VideoTrackingOptions {
+public struct PlayerContent {
     public let contentId: String?
     public let title: String?
     public let deliveryMode: DeliveryMode?

@@ -2,7 +2,7 @@ import AVFoundation
 import XCTest
 import AmplitudeSwift
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 // MARK: - Finding 1: teardown() cannot be overridden (SDK limitation)
 // BasePlugin.teardown() is `public` not `open`, so external plugins cannot override it.
@@ -33,7 +33,7 @@ final class DeinitFinalizationTests: XCTestCase {
                                                   delayedEventsFactory: { _, _ in transport },
                                                   pulseTimerFactory: PulseTimer.init)
             amplitude.add(plugin: plugin)
-            plugin.trackVideo(player: player, options: VideoTrackingOptions())
+            plugin.trackPlayer(player: player, content: PlayerContent())
             player.fire(.played)
 
             let arrived = expectation(description: "play arrived")
@@ -207,7 +207,7 @@ final class DeinitOffQueueReadTests: XCTestCase {
                                                   delayedEventsFactory: { _, _ in transport },
                                                   pulseTimerFactory: PulseTimer.init)
             amplitude.add(plugin: plugin)
-            plugin.trackVideo(player: player, options: VideoTrackingOptions())
+            plugin.trackPlayer(player: player, content: PlayerContent())
             player.fire(.played)
 
             let arrived = expectation(description: "play arrived")
@@ -223,9 +223,9 @@ final class DeinitOffQueueReadTests: XCTestCase {
     }
 }
 
-// MARK: - Finding 7 (refuted): setup/trackVideo race — no real window
+// MARK: - Finding 7 (refuted): setup/trackPlayer race — no real window
 
-final class SetupTrackVideoRaceTests: XCTestCase {
+final class SetupTrackPlayerRaceTests: XCTestCase {
 
     /// DelayedEvents adds itself to the timeline in its init, so the transport is
     /// ready by the time setup() returns. This is a regression test confirming it.
@@ -240,7 +240,7 @@ final class SetupTrackVideoRaceTests: XCTestCase {
         // Observed rather than read off the plugin: `track` registers a viewing only when the
         // transport is already there, so a live count is the transport's readiness.
         let player = FakePlayer()
-        plugin.trackVideo(player: player, options: VideoTrackingOptions())
+        plugin.trackPlayer(player: player, content: PlayerContent())
 
         XCTAssertEqual(plugin.activeSessionCount, 1, "transport is set after setup, so the viewing registered")
     }

@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 final class PlayerObserverTests: XCTestCase {
 

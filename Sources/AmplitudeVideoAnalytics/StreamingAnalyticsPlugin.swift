@@ -8,7 +8,7 @@ struct StreamingAnalyticsConfig {
 }
 
 /// Reports what your users watch as Amplitude streaming events.
-/// Add it to your `Amplitude` instance, then call ``trackVideo(player:options:)-(AVPlayer,_)`` per viewing.
+/// Add it to your `Amplitude` instance, then call ``trackPlayer(player:content:)-(AVPlayer,_)`` per viewing.
 public final class StreamingAnalyticsPlugin: UtilityPlugin {
     /// Builds the timer that samples one playing viewing. `PulseTimer.init` is the real one.
     typealias PulseTimerFactory = (TimeInterval, DispatchQueue, @escaping () -> Void) -> PulseTimer
@@ -58,8 +58,8 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
     }
 
     /// Starts tracking one viewing on any ``Player``. A player already being tracked is left alone.
-    func trackVideo(player: Player, options: VideoTrackingOptions) {
-        track(player, keyedOn: ObjectIdentifier(player), options: options)
+    func trackPlayer(player: Player, content: PlayerContent) {
+        track(player, keyedOn: ObjectIdentifier(player), content: content)
     }
 
     /// Starts tracking one viewing on an `AVPlayer`. It ends on its own when the player is deallocated, or
@@ -68,8 +68,8 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
     /// One viewing per player: if this player is already being tracked, the call is refused and logged, and
     /// the viewing already running is left untouched. To track it again — a new video in the same player —
     /// call ``stopTracking(player:)`` first.
-    public func trackVideo(player avPlayer: AVPlayer, options: VideoTrackingOptions) {
-        track(AVPlayerAdapter(avPlayer), keyedOn: ObjectIdentifier(avPlayer), options: options)
+    public func trackPlayer(player avPlayer: AVPlayer, content: PlayerContent) {
+        track(AVPlayerAdapter(avPlayer), keyedOn: ObjectIdentifier(avPlayer), content: content)
     }
 
     /// Ends the viewing being tracked for `avPlayer` and sends its closing event. Does nothing if that
@@ -85,10 +85,10 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
 
     /// `keyedOn` comes from the caller, not from a `Player`: the `AVPlayer` overload wraps its player in a
     /// fresh adapter every call, so a key derived there would never match the viewing already being tracked.
-    private func track(_ player: Player, keyedOn identity: ObjectIdentifier, options: VideoTrackingOptions) {
+    private func track(_ player: Player, keyedOn identity: ObjectIdentifier, content: PlayerContent) {
         queue.sync {
             guard let transport else {
-                logger.error(message: "StreamingAnalyticsPlugin: trackVideo called before amplitude.add(plugin:); this video is not tracked.")
+                logger.error(message: "StreamingAnalyticsPlugin: trackPlayer called before amplitude.add(plugin:); this video is not tracked.")
                 return
             }
             // One viewing per player, as `Player.startObserving(onEvent:)` promises one layer down.
@@ -98,7 +98,7 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
                 return
             }
 
-            let transformer = PlayerStateTransformer(options: options)
+            let transformer = PlayerStateTransformer(content: content)
             // Assigned below: the closure cannot name the observer it belongs to until that observer exists.
             weak var tracked: PlayerObserver?
             let observer = PlayerObserver(
@@ -110,7 +110,7 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
                         transport.track(event)
                     }
                     // `stopTracking` drops the entry at once but this `.final` is published later, so a
-                    // `trackVideo` enqueued in between is allowed and registers a live viewing here. Only
+                    // `trackPlayer` enqueued in between is allowed and registers a live viewing here. Only
                     // the observer still registered may evict itself.
                     guard state.phase == .final, self?.observersByPlayer[identity] === tracked else { return }
                     self?.observersByPlayer.removeValue(forKey: identity)

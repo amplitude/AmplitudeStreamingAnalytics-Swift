@@ -12,12 +12,12 @@ final class PlayerStateTransformer {
     }
 
     private let streamSessionId = UUID().uuidString
-    private let options: VideoTrackingOptions
+    private let content: PlayerContent
     /// Non-nil exactly while a play is open.
     private var play: Play?
 
-    init(options: VideoTrackingOptions) {
-        self.options = options
+    init(content: PlayerContent) {
+        self.content = content
     }
 
     /// The events for `state`, in tracking order. Instants carry `forcePulse`; the pending stop does not,
@@ -44,14 +44,14 @@ final class PlayerStateTransformer {
     }
 
     private func start(_ play: Play, _ state: PlayerState, at now: Date) -> DelayedEvent {
-        let event = StreamingEvents.started(options: options,
+        let event = StreamingEvents.started(content: content,
                                             state: streamingState(play, state, at: now, insertId: play.startInsertId))
         event.markForcePulse()
         return event
     }
 
     private func pendingStop(_ play: Play, _ state: PlayerState, at now: Date) -> DelayedEvent {
-        StreamingEvents.stopped(options: options,
+        StreamingEvents.stopped(content: content,
                                 state: streamingState(play, state, at: now,
                                                       insertId: play.stopInsertId,
                                                       stopReason: .timeout))
@@ -61,7 +61,7 @@ final class PlayerStateTransformer {
                       _ state: PlayerState,
                       at now: Date,
                       reason: PlayerState.StopReason) -> DelayedEvent {
-        let event = StreamingEvents.stopped(options: options,
+        let event = StreamingEvents.stopped(content: content,
                                             state: streamingState(play, state, at: now,
                                                                   insertId: play.stopInsertId,
                                                                   stopReason: reason.streamingStopReason,

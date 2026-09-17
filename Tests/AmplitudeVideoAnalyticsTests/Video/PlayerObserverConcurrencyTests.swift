@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 /// `Player` may fire on any thread; the observer hops every event onto the owner's queue and is the only
 /// thing that calls the player.

@@ -2,7 +2,7 @@ import AVFoundation
 import CoreVideo
 import XCTest
 
-@testable import AmplitudeVideoAnalytics
+@testable import AmplitudeStreamingAnalytics
 
 /// Regression guard for the `onEvent` data race: AVFoundation delivers events on its own threads while the SDK
 /// tears observation down on its queue. Both touch `onEvent`, so the read has to be synchronised — without it

@@ -9,17 +9,17 @@ enum StreamingEvents {
     /// v1 tracks `AVPlayer` video. Audio gets its own value rather than its own event types.
     private static let mediaType = "video"
 
-    static func started(options: VideoTrackingOptions, state: StreamingState) -> DelayedEvent {
+    static func started(content: PlayerContent, state: StreamingState) -> DelayedEvent {
         makeEvent(type: startedType,
                   state: state,
                   kind: .instant,
-                  properties: baseProperties(options: options, state: state))
+                  properties: baseProperties(content: content, state: state))
     }
 
     /// `timeout` is the reason the server holds a row open, so it is the only one that stays in the
     /// delayed lane; every other reason is what finalizes that row.
-    static func stopped(options: VideoTrackingOptions, state: StreamingState) -> DelayedEvent {
-        var properties = baseProperties(options: options, state: state)
+    static func stopped(content: PlayerContent, state: StreamingState) -> DelayedEvent {
+        var properties = baseProperties(content: content, state: state)
         properties["stream_duration"] = state.streamDuration
         if let duration = state.duration {
             properties["percent_completed"] = percentCompleted(position: state.position, duration: duration)
@@ -36,16 +36,16 @@ enum StreamingEvents {
                          properties: properties)
     }
 
-    private static func baseProperties(options: VideoTrackingOptions, state: StreamingState) -> [String: Any] {
-        var properties = options.extraEventProperties
-        if let contentId = options.contentId {
+    private static func baseProperties(content: PlayerContent, state: StreamingState) -> [String: Any] {
+        var properties = content.extraEventProperties
+        if let contentId = content.contentId {
             properties["content_id"] = contentId
         }
-        if let title = options.title {
+        if let title = content.title {
             properties["title"] = title
         }
         properties["media_type"] = mediaType
-        properties["delivery_mode"] = (options.deliveryMode ?? (state.duration == nil ? .live : .onDemand)).rawValue
+        properties["delivery_mode"] = (content.deliveryMode ?? (state.duration == nil ? .live : .onDemand)).rawValue
         properties["stream_session_id"] = state.streamSessionId
         properties["play_id"] = state.playId
         if let duration = state.duration {

@@ -1,4 +1,4 @@
-import AmplitudeVideoAnalytics
+import AmplitudeStreamingAnalytics
 import AVKit
 import SwiftUI
 import UIKit
@@ -78,9 +78,9 @@ final class UIKitPlayerViewController: UIViewController {
             self?.teardownPlayer()
         }
 
-        plugin?.trackVideo(
+        plugin?.trackPlayer(
             player: player,
-            options: VideoTrackingOptions(
+            content: PlayerContent(
                 contentId: "bipbop-4x3",
                 title: "BipBop (UIKit)",
                 deliveryMode: .onDemand
