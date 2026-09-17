@@ -5,44 +5,55 @@
   <br />
 </p>
 
-# Amplitude-{LanguageName}
+# AmplitudeStreamingAnalytics-Swift
 
-This is Amplitude's latest version of the {LanguageName} SDK.
+Amplitude's Streaming Analytics SDK for Apple platforms. It reports what your users watch as
+Amplitude events.
+
+> **Alpha.** This SDK is ready to use in production, but nothing in it is final. The public API,
+> the internal behaviour, and the events it sends can all change before GA.
 
 ## Need Help?
-If you have any issues using our SDK, feel free to [create a GitHub issue](https://github.com/amplitude/Amplitude-SDK-Template/issues/new) or submit a request on [Amplitude Help](https://help.amplitude.com/hc/en-us/requests/new).
+If you have any issues using our SDK, feel free to [create a GitHub issue](https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift/issues/new) or submit a request on [Amplitude Help](https://help.amplitude.com/hc/en-us/requests/new).
 
+## SDK support
 
-# Template Usage
+iOS 13.0+, tvOS 13.0+, and macOS 10.15+. Requires Amplitude-Swift 1.18.6 or later.
 
-## Creating a new repository 
-- Go to [create a new repo page](https://github.com/organizations/amplitude/repositories/new)
-- Name your repository as Amplitude-{language} (example: Amplitude-TypeScript)
-- Provide a description like “{Language} Amplitude Analytics SDK”
-- Specify Internal as the type of repository. We will make it Public later
-- Add a README.md file
-- Use the suggested .gitignore template for the language you are using
+## Installation
 
-## Securing the repository 
-- Go to the Settings page in your repository
-- Go to Branches
-- Add a branch protection rule called “main” for the main branch
-  - Check “Require a pull request before merging”
-  - Check “Require approvals”
-  - Check “Dismiss stale pull request approvals when new commits are pushed”
-  - If there are any status checks, check “Require status checks to pass before merging”
+Swift Package Manager. There are no tagged releases during the Alpha, so pin a commit SHA:
 
-## Adding team members 
-- Go to Settings page in your repository
-- Go to Collaborators and teams
-- In Manage Access section, click on Add teams
-- Search by the name of the team, and click Add teams  
+```swift
+dependencies: [
+    .package(url: "https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git", revision: "<commit-sha>")
+]
+```
 
-## Applying templates
-- Clone the new repository
-- Create a branch (You do not have to preface the branch name with the JIRA ticket number)
-- Create .github/pull_request_template.md using this template
-- Create a .github/ISSUE_TEMPLATE folder with the following files
-- Add a LICENSE file
-- Edit the README.md as necessary
-- Create a PR with these files and have someone review (This makes sure we have the proper branch protection rules)
+## Quickstart
+
+Add the plugin to your `Amplitude` instance once, then track each player you create.
+
+```swift
+import AVFoundation
+import AmplitudeSwift
+import AmplitudeStreamingAnalytics
+
+// At startup.
+let amplitude = Amplitude(configuration: Configuration(apiKey: API_KEY))
+let streaming = StreamingAnalyticsPlugin()
+amplitude.add(plugin: streaming)
+
+// For each video. Create the player and give it an item before you track it.
+let player = AVPlayer(url: videoURL)
+streaming.trackPlayer(player: player, content: PlayerContent(contentId: "ep-42", title: "Pilot"))
+player.play()
+
+// When the viewer is done.
+streaming.stopTracking(player: player)
+```
+
+You can skip `stopTracking(player:)` if the player is about to go away. The SDK holds the player
+weakly and closes the viewing when it deallocates.
+
+See [`docs/`](docs/) for the full reference.
