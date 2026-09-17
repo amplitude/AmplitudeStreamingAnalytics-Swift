@@ -46,17 +46,21 @@ final class PlayerContractTests: XCTestCase {
     /// 2. The SDK never calls back into the player from inside `onEvent` — `.seeking` carries its own reading
     /// as an associated value precisely so this stays absolute.
     func testThePlayerIsNeverCalledFromInsideOnEvent() {
-        let contract = Contract(label: "no-reentrancy")
-        contract.start()
-
         let everyKind: [PlayerEvent] = [.played, .seeking(from: Playhead(position: 3, duration: 100)),
                                         .seeked, .paused, .ended, .error(message: "boom"), .released]
+        // One contract each: `.error` and `.released` end the viewing, and a shared one would leave every
+        // event after them firing into a detached player, testing nothing.
         for event in everyKind {
+            let contract = Contract(label: "no-reentrancy-\(event)")
+            contract.start()
+            contract.player.fire(.played)         // a live viewing, so nothing is dropped before it is read
+            contract.drain()
+
             contract.player.fire(event)
             contract.drain()
-        }
 
-        XCTAssertEqual(contract.player.reentrantCalls, 0, "the SDK re-entered the player from inside onEvent")
+            XCTAssertEqual(contract.player.reentrantCalls, 0, "the SDK re-entered the player on \(event)")
+        }
     }
 
     /// 3. `onEvent` may be called from any thread, including synchronously from inside `startObserving()`.
@@ -75,7 +79,6 @@ final class PlayerContractTests: XCTestCase {
     /// 4. The SDK holds the conformer for the life of the viewing.
     func testTheSDKHoldsThePlayerAfterTheCallerLetsGo() {
         let queue = DispatchQueue(label: "contract-holds-player")
-        MockPlayer.claim(queue)
         let recorder = StateLog()
         weak var weakPlayer: MockPlayer?
         var observer: PlayerObserver?
@@ -83,6 +86,7 @@ final class PlayerContractTests: XCTestCase {
         // The only strong reference left when this scope exits is the SDK's own.
         autoreleasepool {
             let player = MockPlayer()
+            player.claim(queue)
             weakPlayer = player
             observer = PlayerObserver(player: player, queue: queue, logger: nil) { recorder.record($0) }
                 makePulse: { PulseTimer(interval: 3600, queue: queue, handler: $0) }
@@ -339,7 +343,7 @@ private final class Contract {
     init(label: String) {
         player.duration = 100
         let queue = DispatchQueue(label: "contract-\(label)")
-        MockPlayer.claim(queue)
+        player.claim(queue)
         self.queue = queue
 
         let recorder = self.recorder

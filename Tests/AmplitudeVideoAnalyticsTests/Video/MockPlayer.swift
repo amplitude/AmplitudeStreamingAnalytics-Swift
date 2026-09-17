@@ -8,11 +8,12 @@ import Foundation
 /// it is the subject of `PlayerContractTests`, where every assertion is about the SDK's side of the bargain.
 final class MockPlayer: Player {
     /// Marks the queue the SDK promised to call from, so calls arriving elsewhere can be counted rather than
-    /// crashing the suite the way `dispatchPrecondition` would.
-    static let queueKey = DispatchSpecificKey<UInt8>()
-    private static let queueToken: UInt8 = 1
+    /// crashing the suite the way `dispatchPrecondition` would. One key per player: a shared one would make
+    /// every other player's queue look like this one's.
+    private let queueKey = DispatchSpecificKey<UInt8>()
+    private let queueToken: UInt8 = 1
 
-    static func claim(_ queue: DispatchQueue) {
+    func claim(_ queue: DispatchQueue) {
         queue.setSpecific(key: queueKey, value: queueToken)
     }
 
@@ -115,7 +116,7 @@ final class MockPlayer: Player {
     // MARK: - bookkeeping
 
     private func enter() {
-        let onQueue = DispatchQueue.getSpecific(key: Self.queueKey) == Self.queueToken
+        let onQueue = DispatchQueue.getSpecific(key: queueKey) == queueToken
         lock.withLock {
             if !onQueue { callsOffTheQueueValue += 1 }
             if let deliveringThread, deliveringThread == Thread.current { reentrantCallsValue += 1 }
