@@ -62,7 +62,7 @@ jobs:
           case "${{ matrix.platform }}" in
             iOS)
               xcodebuild test \
-                -scheme AmplitudeVideo-Swift \
+                -scheme AmplitudeStreamingAnalytics-Swift \
                 -sdk iphonesimulator \
                 -destination 'platform=iOS Simulator,OS=${{ matrix.test-destination-os }},name=${{ matrix.device }}'
               ;;
@@ -71,7 +71,7 @@ jobs:
               ;;
             tvOS)
               xcodebuild \
-                -scheme AmplitudeVideo-Swift \
+                -scheme AmplitudeStreamingAnalytics-Swift \
                 -sdk appletvsimulator \
                 -destination 'platform=tvOS Simulator,OS=${{ matrix.test-destination-os }},name=${{ matrix.device }}' \
                 test
