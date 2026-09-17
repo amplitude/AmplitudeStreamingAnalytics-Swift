@@ -1,16 +1,15 @@
 # Getting started
 
-> **Alpha.** This SDK is in Alpha. It is stable enough for production use, but its internal behaviour, its public API and the events it sends may all change before GA.
+> **Alpha.** This SDK is ready to use in production, but nothing in it is final. The public API, the internal behaviour, and the events it sends can all change before GA.
 
-> **Note:** Scope of this document
+> **Note:** Scope
 >
-> This describes the Alpha. It will be obsolete — and probably deleted — when the SDK reaches GA, at which point [the Amplitude docsite](https://amplitude.com/docs) becomes the source of truth.
+> These pages describe the Alpha. They will be removed at GA, when [the Amplitude docsite](https://amplitude.com/docs) takes over.
 
 **Package:** AmplitudeStreamingAnalytics
-**Latest version:** unreleased — install by commit SHA
+**Latest version:** unreleased; install by commit SHA
 
-Amplitude Streaming Analytics reports what your users watch as Amplitude events. This page covers
-installing the package, adding the plugin, and starting and stopping a viewing.
+Amplitude Streaming Analytics reports what your users watch as Amplitude events.
 
 ## Before you begin
 
@@ -22,11 +21,9 @@ You need:
 
 ## Quickstart
 
-### SPM
+### Install
 
-`git tag -l` has no tags yet and there is no podspec, so a version constraint such as `from:
-"1.0.0"` resolves to nothing. Pin Swift Package Manager to a commit SHA instead; tagged releases
-arrive at GA.
+There are no tagged releases during the Alpha, so pin a commit SHA:
 
 ```swift
 dependencies: [
@@ -34,7 +31,7 @@ dependencies: [
 ]
 ```
 
-You can also add it through Xcode: **File > Add Package Dependencies…**, enter
+In Xcode, use **File > Add Package Dependencies…**, enter
 `https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git`, choose **Branch/Commit**,
 and paste the SHA.
 
@@ -53,8 +50,8 @@ amplitude.add(plugin: streaming)
 
 ## Configuration
 
-`StreamingAnalyticsPlugin` itself takes no configuration. What you can configure per viewing is
-`PlayerContent` — see [Configuration](configuration.md).
+`StreamingAnalyticsPlugin` takes no configuration. You configure each viewing through
+`PlayerContent` instead. See [Configuration](configuration.md).
 
 ### Starting a viewing
 
@@ -62,47 +59,49 @@ Call `trackPlayer(player:content:)` with the `AVPlayer` you are playing and a `P
 describing it:
 
 ```swift
-streaming.trackPlayer(player: avPlayer, content: PlayerContent(contentId: "ep-42", title: "Pilot", deliveryMode: .onDemand))
+let player = AVPlayer(url: videoURL)
+streaming.trackPlayer(player: player, content: PlayerContent(contentId: "ep-42", title: "Pilot", deliveryMode: .onDemand))
+player.play()
 ```
 
 > **Note:** One viewing per player
 >
-> Only one viewing can be tracked per `AVPlayer` at a time. Calling `trackPlayer(player:content:)` again on a player that is already tracked is refused: the SDK logs an error and leaves the viewing already running untouched. To track a new video in the same player, call `stopTracking(player:)` first.
+> You can track one viewing per `AVPlayer` at a time. If you call `trackPlayer(player:content:)` on a player that is already tracked, the SDK logs an error and leaves the running viewing alone. To track a new video in the same player, call `stopTracking(player:)` first.
 
-> **Note:** `[Amplitude] Stream Started` fires per play, not per call
+> **Note:** `[Amplitude] Stream Started` fires when playback starts
 >
-> `trackPlayer(player:content:)` begins tracking a viewing, but `[Amplitude] Stream Started` fires when the player starts playing, and a viewing that pauses and resumes sends it — and a matching `[Amplitude] Stream Stopped` — more than once. See [Events: Viewings and plays](events.md#viewings-and-plays).
+> `trackPlayer(player:content:)` begins the viewing, but the first `[Amplitude] Stream Started` waits until the player actually starts playing. A viewing that pauses and resumes sends several Started events and several Stopped events. See [Events: Viewings and plays](events.md#viewings-and-plays).
 
 ### Stopping a viewing
 
 Call `stopTracking(player:)` to end tracking for a player:
 
 ```swift
-streaming.stopTracking(player: avPlayer)
+streaming.stopTracking(player: player)
 ```
 
-If the player is currently playing, this sends the closing `[Amplitude] Stream Stopped` for the
-play in progress. If no play is open — the player is already paused, for example — it sends
-nothing further; that play was already closed when the player paused. See
-[Events: Viewings and plays](events.md#viewings-and-plays).
+If the player is playing, this sends a closing `[Amplitude] Stream Stopped`. If the player is
+already paused, the SDK sent that event when the pause happened and sends nothing now.
 
-Calling `stopTracking(player:)` on a player that is not being tracked at all does nothing, and
-does not touch playback.
+Calling `stopTracking(player:)` on a player you never tracked does nothing. It never touches
+playback.
 
 > **Tip:** Tracking also ends on its own
 >
-> You do not have to call `stopTracking(player:)` when a screen is dismissed. The SDK holds the `AVPlayer` weakly and ends tracking on its own as soon as the player deallocates. If a play was open at that point, this sends its closing event, same as an explicit `stopTracking(player:)` would.
+> You do not have to call `stopTracking(player:)` when a screen goes away. The SDK holds the `AVPlayer` weakly and ends the viewing when the player deallocates, sending the same closing event an explicit `stopTracking(player:)` would.
+
+## What is fixed in Alpha
+
+The sample interval and the delayed-event TTL live in `StreamingAnalyticsConfig`, which is internal.
+The Alpha ships them as fixed defaults on purpose; `PlayerContent` is the only thing you configure.
 
 ## Known limitations
 
-- CocoaPods distribution is not available yet; use Swift Package Manager.
-- There is no tagged release yet; pin a commit SHA, and expect it to move as the Alpha changes.
-- `StreamingAnalyticsConfig` (sample interval, delayed-event TTL) is internal in Alpha and not
-  caller-configurable.
-- Track a player only once its item is set. `trackPlayer(player:content:)` attaches the item-level
-  observers to whatever `AVPlayer.currentItem` holds at that moment, and does not pick one up later.
-  Track a player that has none and the viewing never reports that item reaching its end or failing,
-  and a forward seek in it is counted as watched time.
-- `replaceCurrentItem` is not followed. The viewing goes on reporting under the `PlayerContent` it
-  was started with, so the next item's playback lands on the previous `content_id`. Call
-  `stopTracking(player:)` and then `trackPlayer(player:content:)` with the new content instead.
+- Give the player an item before you track it. `trackPlayer(player:content:)` looks at
+  `AVPlayer.currentItem` once, when you call it, and attaches the observers that report the item
+  finishing, failing, or seeking. Track a player that has no item yet and you lose all three for
+  that item: no `ended`, no `error`, and forward seeks counted as watched time.
+- The SDK does not follow `replaceCurrentItem`. The viewing keeps reporting under the
+  `PlayerContent` you started it with, so the next video's events carry the previous video's
+  `content_id`. Call `stopTracking(player:)`, then `trackPlayer(player:content:)` with the new
+  content.

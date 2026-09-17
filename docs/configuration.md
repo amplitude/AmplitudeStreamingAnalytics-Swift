@@ -1,16 +1,16 @@
 # Configuration
 
-> **Alpha.** This SDK is in Alpha. It is stable enough for production use, but its internal behaviour, its public API and the events it sends may all change before GA.
+> **Alpha.** This SDK is ready to use in production, but nothing in it is final. The public API, the internal behaviour, and the events it sends can all change before GA.
 
-> **Note:** Scope of this document
+> **Note:** Scope
 >
-> This describes the Alpha. It will be obsolete — and probably deleted — when the SDK reaches GA, at which point [the Amplitude docsite](https://amplitude.com/docs) becomes the source of truth.
+> These pages describe the Alpha. They will be removed at GA, when [the Amplitude docsite](https://amplitude.com/docs) takes over.
 
 **Package:** AmplitudeStreamingAnalytics
-**Latest version:** unreleased — install by commit SHA
+**Latest version:** unreleased; install by commit SHA
 
 `PlayerContent` describes the content you are tracking. Pass it to `trackPlayer(player:content:)`
-when you start a viewing — see [Getting started](getting-started.md).
+when you start a viewing. See [Getting started](getting-started.md).
 
 ## PlayerContent
 
@@ -18,8 +18,8 @@ when you start a viewing — see [Getting started](getting-started.md).
 | --- | --- | --- | --- | --- |
 | `contentId` | `String?` | No | `nil` | Your identifier for the content. Sent as `content_id`. |
 | `title` | `String?` | No | `nil` | Human-readable title. Sent as `title`. |
-| `deliveryMode` | `DeliveryMode?` | No | `nil` | `.onDemand` or `.live`. When `nil`, inferred from whether the item has a duration. |
-| `extraEventProperties` | `[String: Any]` | No | `[:]` | Extra properties merged into every event this viewing sends. |
+| `deliveryMode` | `DeliveryMode?` | No | `nil` | `.onDemand` or `.live`. When `nil`, the SDK infers it from whether the item has a duration. |
+| `extraEventProperties` | `[String: Any]` | No | `[:]` | Extra properties added to every event this viewing sends. |
 
 ```swift
 let content = PlayerContent(
@@ -30,12 +30,13 @@ let content = PlayerContent(
 )
 ```
 
-### The collision rule
+## How extraEventProperties merges
 
-Every event starts from `extraEventProperties`, then the SDK sets its own properties on top. An
-`extraEventProperties` entry under a key the SDK sets on that event is overwritten; one under a key
-the SDK does not set on it survives. Which keys it sets depends on the event type — see
-[Events](events.md) for what each one means.
+The SDK starts each event from your `extraEventProperties`, then writes its own properties over
+the top. If you use a key the SDK also sets on that event, the SDK's value wins and yours is gone.
+If you use a key the SDK does not set on that event, your value goes through.
+
+Which keys the SDK sets depends on the event. See [Events](events.md) for what each one means.
 
 | Key | On `[Amplitude] Stream Started` | On `[Amplitude] Stream Stopped` |
 | --- | --- | --- |
@@ -45,39 +46,33 @@ the SDK does not set on it survives. Which keys it sets depends on the event typ
 | `play_id` | always | always |
 | `start_time` | always | always |
 | `position` | always | always |
-| `content_id` | when `PlayerContent.contentId` is non-nil | same |
-| `title` | when `PlayerContent.title` is non-nil | same |
-| `duration` | when the item's duration is known — not a live stream, and the player has reported one | same |
-| `stream_duration` | never set | always |
-| `percent_completed` | never set | when the item's duration is known |
-| `stop_reason` | never set | whenever the SDK has a reason for the stop, which it has for every Stopped event it sends |
-| `error_message` | never set | only when the player reported an error message |
+| `content_id` | when `PlayerContent.contentId` is set | same |
+| `title` | when `PlayerContent.title` is set | same |
+| `duration` | when the player knows the item's duration | same |
+| `stream_duration` | never | always |
+| `percent_completed` | never | when the player knows the item's duration |
+| `stop_reason` | never | always |
+| `error_message` | never | when the player reported an error message |
 
 ```swift
-// contentId is nil, so it sets nothing: extraEventProperties["content_id"] survives as "x".
+// contentId is nil, so the SDK sets nothing and your value survives as "x".
 let content = PlayerContent(extraEventProperties: ["content_id": "x"])
 
-// contentId is set, so it wins: the event carries "y", not "z".
+// contentId is set, so the event carries "y". The "z" is dropped.
 let overridden = PlayerContent(contentId: "y", extraEventProperties: ["content_id": "z"])
 ```
 
-Use `extraEventProperties` for keys that appear in neither column of the table. Relying on it to
-override a conditional key only works while the SDK's own value for that key is absent, and it
-never overrides the six keys the SDK always sets.
+Pick names for `extraEventProperties` that the table does not list at all. Two cases go wrong
+quietly:
 
-The four keys set on `[Amplitude] Stream Stopped` and never on `[Amplitude] Stream Started` are the
-trap: an `extraEventProperties` entry named `stream_duration`, `percent_completed`, `stop_reason`
-or `error_message` reaches every Started event intact, then is silently overwritten on the Stopped
-events where the SDK has its own value — always for `stream_duration`, and on the conditions above
-for the other three. One key, two meanings in the same viewing's data, and no error either way.
-Pick a different name.
+- A conditional key such as `content_id` lets your value through only while the SDK has no value
+  of its own. The moment you set `contentId`, your property disappears from the data.
+- `stream_duration`, `percent_completed`, `stop_reason` and `error_message` reach every Started
+  event intact, because the SDK sets them only on Stopped events. The same key then means one
+  thing on your Started events and another on your Stopped events, in the same viewing, with no
+  error to tell you.
 
-## What you cannot configure yet
+## What you cannot configure
 
-`StreamingAnalyticsConfig` — the sample interval and the delayed-event TTL — is internal in Alpha.
-There is no public initializer parameter or setter for either; both use SDK-chosen defaults.
-
-## Known limitations
-
-- Only `PlayerContent` is caller-configurable. Sampling interval and delayed-event TTL are fixed
-  for Alpha.
+The sample interval and the delayed-event TTL live in `StreamingAnalyticsConfig`, which is
+internal. The Alpha ships them as fixed defaults on purpose.

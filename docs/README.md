@@ -1,20 +1,21 @@
 # AmplitudeStreamingAnalytics-Swift docs
 
-> **Alpha.** This SDK is in Alpha. It is stable enough for production use, but its internal behaviour, its public API and the events it sends may all change before GA.
+> **Alpha.** This SDK is ready to use in production, but nothing in it is final. The public API, the internal behaviour, and the events it sends can all change before GA.
 
-> **Note:** Scope of this document
+> **Note:** Scope
 >
-> This describes the Alpha. It will be obsolete — and probably deleted — when the SDK reaches GA, at which point [the Amplitude docsite](https://amplitude.com/docs) becomes the source of truth.
+> These pages describe the Alpha. They will be removed at GA, when [the Amplitude docsite](https://amplitude.com/docs) takes over.
 
 **Package:** AmplitudeStreamingAnalytics
-**Latest version:** unreleased — install by commit SHA
+**Latest version:** unreleased; install by commit SHA
 
-Reference documentation for the Alpha of Amplitude's Streaming Analytics SDK for Apple platforms.
-For installation instructions, see the [root README](../README.md).
+Reference for the Alpha of Amplitude's Streaming Analytics SDK for Apple platforms. Installation
+is in the [root README](../README.md).
 
 ## Pages
 
 - [Getting started](getting-started.md) — requirements, installation, adding the plugin, and
   starting and stopping a viewing.
-- [Configuration](configuration.md) — the `PlayerContent` options and the property-collision rule.
-- [Events](events.md) — the wire event names and every property key they send.
+- [Configuration](configuration.md) — the `PlayerContent` fields and how `extraEventProperties`
+  merges.
+- [Events](events.md) — the two events and every property they send.

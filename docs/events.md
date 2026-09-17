@@ -1,89 +1,90 @@
 # Events
 
-> **Alpha.** This SDK is in Alpha. It is stable enough for production use, but its internal behaviour, its public API and the events it sends may all change before GA.
+> **Alpha.** This SDK is ready to use in production, but nothing in it is final. The public API, the internal behaviour, and the events it sends can all change before GA.
 
-> **Note:** Scope of this document
+> **Note:** Scope
 >
-> This describes the Alpha. It will be obsolete — and probably deleted — when the SDK reaches GA, at which point [the Amplitude docsite](https://amplitude.com/docs) becomes the source of truth.
+> These pages describe the Alpha. They will be removed at GA, when [the Amplitude docsite](https://amplitude.com/docs) takes over.
 
 **Package:** AmplitudeStreamingAnalytics
-**Latest version:** unreleased — install by commit SHA
+**Latest version:** unreleased; install by commit SHA
 
-> **Note:** Wire taxonomy is frozen
+> **Note:** These names are frozen
 >
-> The event names and property keys on this page are frozen for Alpha. Renaming any of them would break existing charts and cohorts built on this data, even while other parts of this SDK may still change before GA.
+> The event names and property keys on this page will not change, even though other parts of the SDK still can. Renaming them would break charts and cohorts you have already built.
 
-Amplitude Streaming Analytics sends two event types: `[Amplitude] Stream Started` and
-`[Amplitude] Stream Stopped`.
+The SDK sends two events: `[Amplitude] Stream Started` and `[Amplitude] Stream Stopped`.
 
 ## Viewings and plays
 
-One `trackPlayer(player:content:)` … `stopTracking(player:)` span is one **viewing**, identified
-by `stream_session_id`. A viewing can contain more than one **play**: every time the player enters
-the playing state while no play is already open, a new play starts; every time it leaves the
-playing state — pausing, ending, erroring, or having its tracking stopped — that
-play ends. A seek does not leave the playing state and does not end the play. Each play gets its
-own `play_id` and its own `[Amplitude] Stream Started` /
-`[Amplitude] Stream Stopped` pair.
+Everything between `trackPlayer(player:content:)` and `stopTracking(player:)` is one **viewing**,
+identified by `stream_session_id`.
 
-> **Note:** Count viewings by `stream_session_id`, not by Started events
->
-> A viewing that plays, pauses, and resumes sends `[Amplitude] Stream Started` more than once — once per play, not once per viewing. Counting `[Amplitude] Stream Started` events counts plays. To count viewings, count distinct `stream_session_id` values instead.
+A viewing contains one or more **plays**. A play starts when the player starts playing and ends
+when it stops playing, whether that is a pause, the end of the item, an error, or your call to
+`stopTracking(player:)`. Seeking does not stop playback, so it does not end a play.
 
-> **Note:** Do not sum `stream_duration` across a viewing's Stopped events
+Each play has its own `play_id` and sends its own Started and Stopped pair. So a viewer who
+pauses once and resumes produces two of each.
+
+> **Note:** Count viewings with `stream_session_id`
 >
-> The same trap on the other side. `stream_duration` is cumulative for the whole viewing: it keeps counting across the viewing's plays and is never reset when a new play starts, so every `[Amplitude] Stream Stopped` in a viewing carries the running total, not that play's share. `SUM(stream_duration)` over Stopped events therefore counts the earlier plays again on each later one. For a viewing's watch time, take its last `[Amplitude] Stream Stopped`; for one play's, take the difference between consecutive Stopped events within the `stream_session_id`.
+> Counting `[Amplitude] Stream Started` events gives you plays. Every pause and resume adds one. Count distinct `stream_session_id` values to get viewings.
+
+> **Note:** Do not add up `stream_duration`
+>
+> `stream_duration` is a running total for the whole viewing. It carries on counting across plays and never resets, so each Stopped event in a viewing repeats everything the earlier ones already reported. Summing it over a viewing's Stopped events counts the early plays several times.
+>
+> For a viewing's watch time, read `stream_duration` from its last Stopped event. For one play's watch time, subtract the previous Stopped event's value within the same `stream_session_id`.
 
 ## `[Amplitude] Stream Started`
 
-Sent each time the player enters the playing state while no play is already open for that
-viewing — not when `trackPlayer(player:content:)` is called.
+Sent when the player starts playing. This is not the moment you call
+`trackPlayer(player:content:)`; the SDK waits for playback to begin.
 
 | Property | Type | Always present | Description |
 | --- | --- | --- | --- |
-| `content_id` | `String` | No | From `PlayerContent.contentId`. Omitted when `nil`. |
-| `title` | `String` | No | From `PlayerContent.title`. Omitted when `nil`. |
-| `media_type` | `String` | Yes | Always `"video"` in this Alpha. |
-| `delivery_mode` | `String` | Yes | `"on_demand"` or `"live"`. From `PlayerContent.deliveryMode`, or, when that is `nil`, inferred: `"live"` when the item has no duration, `"on_demand"` otherwise. |
-| `stream_session_id` | `String` | Yes | Identifies this viewing. |
-| `play_id` | `String` | Yes | Identifies the current play within the viewing. |
-| `duration` | `Double` | No | The item's duration, in seconds. Omitted for a live stream, or before the player reports one. |
-| `start_time` | `Double` | Yes | Play-scoped: the playhead position, in seconds, when **this play** started. On a viewing's second play this is where that play began, not where the viewing began. |
-| `position` | `Double` | Yes | The playhead position, in seconds, at this event. |
+| `content_id` | `String` | No | From `PlayerContent.contentId`. Omitted when you leave it `nil`. |
+| `title` | `String` | No | From `PlayerContent.title`. Omitted when you leave it `nil`. |
+| `media_type` | `String` | Yes | Always `"video"` in the Alpha. |
+| `delivery_mode` | `String` | Yes | `"on_demand"` or `"live"`. From `PlayerContent.deliveryMode`. When you leave that `nil`, the SDK sends `"live"` if the item has no duration and `"on_demand"` if it has one. |
+| `stream_session_id` | `String` | Yes | Identifies the viewing. |
+| `play_id` | `String` | Yes | Identifies the play within the viewing. |
+| `duration` | `Double` | No | The item's length in seconds. Omitted for live streams and until the player reports one. |
+| `start_time` | `Double` | Yes | Where this play started, as a playhead position in seconds. On a viewing's second play this is where the second play began. |
+| `position` | `Double` | Yes | The playhead position in seconds when the event was sent. |
 
 ## `[Amplitude] Stream Stopped`
 
-Sent each time the player leaves the playing state while a play is open: pausing, ending,
-erroring, or `stopTracking(player:)` ending the viewing mid-play. A seek does not leave the
-playing state, so it does not send this. Calling
-`stopTracking(player:)` while no play is open — for example, the player is already paused — sends
-nothing, since there is no open play to close. A play that never closes produces one too, carrying
-`stop_reason` `timeout` — see the note below. Carries every property
-`[Amplitude] Stream Started` carries, plus:
+Sent when the player stops playing: a pause, the end of the item, an error, or your call to
+`stopTracking(player:)` while the player is playing. Seeking does not send it. Calling
+`stopTracking(player:)` on a player that is already paused sends nothing, because the pause
+already closed that play.
+
+A play that never closes also produces one, with `stop_reason` `timeout`. See the note below.
+
+It carries every property `[Amplitude] Stream Started` carries, plus:
 
 | Property | Type | Always present | Description |
 | --- | --- | --- | --- |
-| `stream_duration` | `Double` | Yes | Viewing-scoped: seconds of playhead movement counted as watched, accumulated across **every play in the viewing** and never reset at a play boundary. This play's own share is the difference from the previous `[Amplitude] Stream Stopped` in the same `stream_session_id`. |
-| `percent_completed` | `Double` | No | `position / duration`, as a percentage, clamped to 0–100. Omitted when `duration` is unknown. |
-| `stop_reason` | `String` | No | One of `timeout`, `paused`, `ended`, `error`, `untracked`. |
+| `stream_duration` | `Double` | Yes | Seconds watched so far in this **viewing**, counting every play. It never resets between plays, so this is a running total rather than the current play's figure. |
+| `percent_completed` | `Double` | No | `position / duration` as a percentage, clamped to 0–100. Omitted when the duration is unknown. |
+| `stop_reason` | `String` | Yes | One of `timeout`, `paused`, `ended`, `error`, `untracked`. |
 | `error_message` | `String` | No | Present only when the player reported an error message. |
 
-The two scopes sit side by side on one event: `start_time` describes this play, `stream_duration`
-describes the viewing so far.
+Watch the scope difference between the two: `start_time` belongs to the current play, while
+`stream_duration` covers the whole viewing.
 
-> **Note:** `stop_reason` `timeout` marks a play that never closed
+> **Note:** `stop_reason` `timeout` means the play never closed
 >
-> `paused`, `ended`, `error` and `untracked` each name something that ended the play. `timeout` means nothing did: the app stopped — a crash, a force-quit, or a lost network — before it could send a closing event for that play. The row still carries the `position` and `stream_duration` the play had reached before that happened. These rows mark exactly the viewings that ended badly, so do not discard them.
+> `paused`, `ended`, `error` and `untracked` each say what stopped the play. `timeout` says the SDK never got to send a closing event, because the app crashed, was force-quit, or lost the network first. The event still reports the `position` and `stream_duration` the play had reached. These rows mark the viewings that ended badly, so keep them.
 
 ## Known limitations
 
-- `media_type` is always `"video"`; there is no separate event type or value for audio-only
-  playback yet.
+- `media_type` is always `"video"`. Audio-only playback has no separate event or value yet.
 - A player tracked before its `AVPlayer.currentItem` is set never sends `stop_reason` `ended` or
-  `error` for that item, and a forward seek in it adds the skipped seconds to `stream_duration`.
-  Track the player only after its item is set.
-- A `replaceCurrentItem` is not followed: the viewing keeps reporting under the `PlayerContent` it
-  started with, so the next item's events carry the previous item's `content_id` and `title`. Stop
-  and re-track instead — see
+  `error` for that item, and forward seeks in it are counted as watched time. Track the player
+  after you give it an item.
+- The SDK does not follow `replaceCurrentItem`, so the next video's events carry the previous
+  video's `content_id` and `title`. Stop and re-track instead. See
   [Getting started: Known limitations](getting-started.md#known-limitations).
-- The taxonomy above is frozen for Alpha — see the note near the top of this page.
