@@ -1,0 +1,60 @@
+# Release Please automates versioning, the changelog, GitHub Releases and tags.
+# Config: release-please-config.json | Manifest: .release-please-manifest.json
+#
+# Swift Package Manager has no registry: consumers resolve straight from the git
+# tag this workflow creates, so tagging *is* publishing. There is no separate
+# publish job, and no CocoaPods push — this SDK ships no podspec.
+#
+# `release-type` is "simple" because release-please has no Swift updater. Files
+# carrying a version string are listed under `extra-files` and annotated with
+# `x-release-please-version`.
+#
+# `prerelease-type` carries its own ".1" on purpose. release-please only appends
+# a number when it bumps a prerelease that already has one, so plain "alpha"
+# would make the first tag v0.1.0-alpha and only the second v0.1.0-alpha.1.
+#
+# `bump-patch-for-minor-pre-major` is false so the first release is v0.1.0-alpha.1
+# rather than v0.0.1-alpha.1. The prerelease strategy keeps a breaking change on
+# the alpha train only while the patch component is 0: from 0.0.1-alpha.n a single
+# feat! would have released 0.1.0 with no alpha suffix at all.
+#
+# === Graduating from alpha to stable 1.0.0 ===
+#
+# 1. In release-please-config.json set "prerelease": false and remove
+#    "prerelease-type" and "versioning".
+# 2. Land the graduating commit with a "Release-As: 1.0.0" footer. Without it the
+#    next release is an ordinary semver bump of the current 0.x version, not
+#    1.0.0.
+# 3. After that, remove "bump-minor-pre-major" and "bump-patch-for-minor-pre-major"
+#    so standard semver applies: fix -> patch, feat -> minor, feat!/fix! -> major.
+
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859
+        with:
+          app-id: ${{ secrets.SDK_RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.SDK_RELEASE_BOT_PRIVATE_KEY }}
+
+      - uses: amplitude/actions/release-please-action@8091f292e3d0337c43e97e52e639192b64963021 # v0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
