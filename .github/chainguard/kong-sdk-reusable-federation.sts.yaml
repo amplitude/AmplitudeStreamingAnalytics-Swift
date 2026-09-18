@@ -1,0 +1,13 @@
+# SDK source access for Kong's reusable Linux federation job.
+# Caller code is never executed by this job; macOS builds receive only the artifact.
+issuer: https://token.actions.githubusercontent.com
+subject_pattern: '^repo:amplitude@2291562/kong@1352947268:ref:refs/heads/.+$'
+audience: octo-sts.ops.amplitude.com
+
+claim_pattern:
+  event_name: '^workflow_dispatch$'
+  workflow_ref: '^amplitude/kong/\.github/workflows/(swift-bridge|streaming-analytics-e2e)\.yml@refs/heads/.+$'
+  job_workflow_ref: '^amplitude/kong/\.github/workflows/sdk-federation\.yml@refs/heads/main$'
+
+permissions:
+  contents: read
