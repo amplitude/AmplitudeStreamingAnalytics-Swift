@@ -46,6 +46,7 @@ final class DelayedEvents: BeforePlugin {
     /// enriched. Returning nil keeps delayed events out of the host's uploader.
     override func execute(event: BaseEvent) -> BaseEvent? {
         guard let delayed = event as? DelayedEvent else { return event }
+        delayed.library = configuration.library ?? delayed.library
         tracker.track(delayed)
         return nil
     }

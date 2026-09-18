@@ -7,4 +7,5 @@ struct DelayedEventsConfiguration {
     var pulseInterval: TimeInterval = 60
     var ttlMs: Int64 = 3_600_000
     var eventsSizeLimit = 40_000
+    var library: String?
 }

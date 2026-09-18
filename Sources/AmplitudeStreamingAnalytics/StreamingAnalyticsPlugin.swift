@@ -52,7 +52,9 @@ public final class StreamingAnalyticsPlugin: UtilityPlugin {
         queue.sync {
             guard transport == nil else { return }
 
-            let configuration = DelayedEventsConfiguration(ttlMs: config.delayedEventTtl.milliseconds)
+            let configuration = DelayedEventsConfiguration(
+                ttlMs: config.delayedEventTtl.milliseconds,
+                library: "\(StreamingAnalyticsInfo.library)/\(StreamingAnalyticsInfo.version)")
             transport = delayedEventsFactory(amplitude, configuration)
         }
     }

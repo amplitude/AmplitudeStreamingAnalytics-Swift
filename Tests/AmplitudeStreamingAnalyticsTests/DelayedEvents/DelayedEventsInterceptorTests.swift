@@ -42,6 +42,28 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertIdentical(delayedEvents.execute(event: event), event)
     }
 
+    func testTheConfiguredLibraryReplacesTheHosts() {
+        makeFacade(configuration: DelayedEventsConfiguration(library: "ours/1.2.3"))
+        let wrapped = makeEvent("ins-1")
+        wrapped.library = "amplitude-swift/1.18.6"
+
+        XCTAssertNil(delayedEvents.execute(event: forced(copying: wrapped)))
+
+        waitForUploads(1)
+        XCTAssertEqual(uploader.bodies[0].events[0].library, "ours/1.2.3")
+    }
+
+    func testTheHostLibrarySurvivesWhenNoLibraryIsConfigured() {
+        makeFacade()
+        let wrapped = makeEvent("ins-1")
+        wrapped.library = "amplitude-swift/1.18.6"
+
+        XCTAssertNil(delayedEvents.execute(event: forced(copying: wrapped)))
+
+        waitForUploads(1)
+        XCTAssertEqual(uploader.bodies[0].events[0].library, "amplitude-swift/1.18.6")
+    }
+
     // MARK: - delayed event
 
     func testDelayedEventCopiesTheWrappedEventsFields() {
@@ -187,6 +209,13 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         let event = BaseEvent(eventType: type)
         event.insertId = insertId
         return event
+    }
+
+    /// Force-pulsed so the upload goes out now rather than on the next pulse interval.
+    private func forced(copying event: BaseEvent) -> DelayedEvent {
+        let delayed = DelayedEvent(copying: event, kind: .delayed)
+        delayed.markForcePulse()
+        return delayed
     }
 
     private func waitForUploads(_ count: Int, timeout: TimeInterval = 5) {
