@@ -27,6 +27,26 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         amplitude.add(plugin: plugin)
     }
 
+    /// The transport must be told who produced the events, or they upload naming only the host SDK.
+    func testSetupTellsTheTransportWhichLibraryProducedTheEvents() {
+        var seen: DelayedEventsConfiguration?
+        let host = Amplitude(configuration: Configuration(apiKey: "lib-\(UUID().uuidString)",
+                                                          instanceName: "lib-\(UUID().uuidString)",
+                                                          autocapture: [],
+                                                          offline: true))
+        let probed = StreamingAnalyticsPlugin(
+            config: StreamingAnalyticsConfig(),
+            delayedEventsFactory: { amplitude, configuration in
+                seen = configuration
+                return self.makeTransport(on: amplitude, uploading: FakeDelayedEventsUploader())
+            },
+            pulseTimerFactory: PulseTimer.init)
+        host.add(plugin: probed)
+
+        XCTAssertEqual(seen?.library,
+                       "\(StreamingAnalyticsInfo.library)/\(StreamingAnalyticsInfo.version)")
+    }
+
     /// A distinctive TTL, so a test can tell this transport's configuration from the default.
     /// Both collaborators are explicit: one test builds its own pair and must not reach the shared ones.
     private func makeTransport(on amplitude: Amplitude, uploading uploader: FakeDelayedEventsUploader) -> DelayedEvents {
