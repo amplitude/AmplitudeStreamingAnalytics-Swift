@@ -6,19 +6,30 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
-    runs-on: macos-14-large
+    # -large, not plain macos-15: SwiftLint is preinstalled only on the Intel
+    # image. The standard macos-15 label is arm64, which does not carry it.
+    runs-on: macos-15-large
+    timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
-      - name: Set Xcode 16
-        run: |
-          sudo xcode-select -switch /Applications/Xcode_16.1.app
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Lint
         run: swiftlint --strict # force to fix warnings too
       - name: DelayedEvents extraction boundary
         run: |
+          # grep exits 2 when the directory is missing, which `if` would read as "clean".
+          test -d Sources/AmplitudeStreamingAnalytics/DelayedEvents || {
+            echo "DelayedEvents/ is missing — this guard would pass without checking anything"; exit 1
+          }
           if grep -rnE 'Player|Streaming' Sources/AmplitudeStreamingAnalytics/DelayedEvents/; then
             echo "DelayedEvents/ must not reference Player or Streaming types (extractability, design v3.1)"; exit 1
           fi

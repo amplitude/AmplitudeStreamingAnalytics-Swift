@@ -7,10 +7,18 @@ on:
       - main
   workflow_call:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   unit-test:
     name: Unit ${{ matrix.platform }} - Xcode ${{ matrix.xcode }} - OS ${{ matrix.test-destination-os }}
     runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 60
 
     strategy:
       fail-fast: false
@@ -77,3 +85,22 @@ jobs:
                 test
               ;;
           esac
+
+  # Stable name for the branch ruleset to require. The matrix jobs interpolate
+  # their names ("Unit iOS - Xcode 16.4 - OS latest"), so requiring those
+  # directly would strand every PR on a check that no longer reports the day
+  # the Xcode version or a platform changes.
+  unit-tests-passed:
+    name: Unit tests passed
+    needs: unit-test
+    # always(), or a failed matrix skips this job — and GitHub counts a skipped
+    # required check as satisfied.
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Matrix succeeded
+        env:
+          RESULT: ${{ needs.unit-test.result }}
+        run: |
+          test "$RESULT" = success || { echo "unit-test matrix: $RESULT"; exit 1; }
