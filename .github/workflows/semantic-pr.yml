@@ -2,8 +2,6 @@ name: Semantic PR Check
 
 on:
   pull_request:
-    # reopened matters for bot-authored PRs: an event triggered by GITHUB_TOKEN
-    # creates no workflow run, and close/reopen is how a human starts one.
     types: [opened, synchronize, reopened, edited]
 
 permissions:
