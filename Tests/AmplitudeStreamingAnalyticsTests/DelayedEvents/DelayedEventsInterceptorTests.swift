@@ -96,12 +96,10 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     func testRoutingFieldsAreNotEncoded() throws {
         let delayed = DelayedEvent(copying: makeEvent("a"), kind: .delayed)
-        delayed.markForcePulse()
 
         let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(delayed))
         let fields = try XCTUnwrap(encoded as? [String: Any])
         XCTAssertNil(fields["kind"])
-        XCTAssertNil(fields["forcePulse"])
         XCTAssertEqual(fields["insert_id"] as? String, "a")
     }
 
@@ -147,15 +145,12 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         XCTAssertEqual(delayedEvents.configuration.ttlMs, 1_234)
     }
 
-    /// `forcePulse` is the retired send trigger: the refreshed value waits for the pulse whether or
-    /// not the caller asked for one.
-    func testFacadeRefreshRidesThePulseEvenWhenForced() {
+    func testFacadeRefreshRidesThePulse() {
         makeFacade(configuration: DelayedEventsConfiguration(pulseInterval: 0.05))
         delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1", type: "First"), kind: .delayed))
         waitForUploads(1)
 
-        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1", type: "Second"), kind: .delayed),
-                            forcePulse: true)
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1", type: "Second"), kind: .delayed))
         let refreshed = waitForUpload { $0.events.map(\.eventType) == ["Second"] }
         XCTAssertNotEqual(refreshed.ttlMs, 0, "nothing is finalized")
     }

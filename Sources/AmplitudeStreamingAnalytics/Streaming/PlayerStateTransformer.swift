@@ -20,8 +20,7 @@ final class PlayerStateTransformer {
         self.content = content
     }
 
-    /// The events for `state`, in tracking order. Instants carry `forcePulse`; the pending stop does not,
-    /// because it rides whichever request the next instant forces.
+    /// The events for `state`, in tracking order.
     func events(for state: PlayerState, at now: Date) -> [DelayedEvent] {
         var start: DelayedEvent?
 
@@ -33,8 +32,6 @@ final class PlayerStateTransformer {
 
         guard let play else { return [] }
 
-        // The pending stop goes first: the forced start triggers the request, so the row must already be in
-        // the live set or that request ships with nothing to keep it alive.
         if state.phase == .playing {
             return [pendingStop(play, state, at: now), start].compactMap { $0 }
         }
@@ -44,10 +41,8 @@ final class PlayerStateTransformer {
     }
 
     private func start(_ play: Play, _ state: PlayerState, at now: Date) -> DelayedEvent {
-        let event = StreamingEvents.started(content: content,
-                                            state: streamingState(play, state, at: now, insertId: play.startInsertId))
-        event.markForcePulse()
-        return event
+        StreamingEvents.started(content: content,
+                                state: streamingState(play, state, at: now, insertId: play.startInsertId))
     }
 
     private func pendingStop(_ play: Play, _ state: PlayerState, at now: Date) -> DelayedEvent {
@@ -61,13 +56,11 @@ final class PlayerStateTransformer {
                       _ state: PlayerState,
                       at now: Date,
                       reason: PlayerState.StopReason) -> DelayedEvent {
-        let event = StreamingEvents.stopped(content: content,
-                                            state: streamingState(play, state, at: now,
-                                                                  insertId: play.stopInsertId,
-                                                                  stopReason: reason.streamingStopReason,
-                                                                  errorMessage: reason.errorMessage))
-        event.markForcePulse()
-        return event
+        StreamingEvents.stopped(content: content,
+                                state: streamingState(play, state, at: now,
+                                                      insertId: play.stopInsertId,
+                                                      stopReason: reason.streamingStopReason,
+                                                      errorMessage: reason.errorMessage))
     }
 
     private func streamingState(_ play: Play,

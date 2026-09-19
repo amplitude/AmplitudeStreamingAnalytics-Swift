@@ -27,10 +27,7 @@ final class DelayedEvents: BeforePlugin {
         amplitude.add(plugin: self)
     }
 
-    func track(_ event: DelayedEvent, forcePulse: Bool = false) {
-        if forcePulse {
-            event.markForcePulse()
-        }
+    func track(_ event: DelayedEvent) {
         amplitude?.track(event: event)
     }
 

@@ -31,10 +31,8 @@ final class PlayerStateTransformerTests: XCTestCase {
     func testEnteringPlayingEmitsThePendingStopThenStarted() {
         let events = emit(.playing, position: 10)
 
-        XCTAssertEqual(events.map(\.eventType), [StreamingEvents.stoppedType, StreamingEvents.startedType],
-                       "order matters: the start forces the request, so the pending stop must be tracked first")
+        XCTAssertEqual(events.map(\.eventType), [StreamingEvents.stoppedType, StreamingEvents.startedType])
         XCTAssertEqual(events.map(\.kind), [.delayed, .instant])
-        XCTAssertEqual(events.map(\.forcePulse), [false, true], "the pending stop rides the start's request")
         XCTAssertEqual(string("stop_reason", events[0]), "timeout")
         XCTAssertEqual(string("stream_session_id", events[0]), string("stream_session_id", events[1]))
         XCTAssertEqual(string("play_id", events[0]), string("play_id", events[1]))
@@ -50,7 +48,6 @@ final class PlayerStateTransformerTests: XCTestCase {
 
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events[0].kind, .delayed)
-        XCTAssertFalse(events[0].forcePulse)
         XCTAssertEqual(events[0].insertId, snapshot.insertId)
         XCTAssertEqual(string("stop_reason", events[0]), "timeout")
         XCTAssertEqual(number("position", events[0]), 15)
@@ -63,7 +60,6 @@ final class PlayerStateTransformerTests: XCTestCase {
 
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events[0].kind, .instant)
-        XCTAssertTrue(events[0].forcePulse)
         XCTAssertEqual(events[0].insertId, snapshot.insertId, "the same row, finalized")
         XCTAssertEqual(string("stop_reason", events[0]), "paused")
         XCTAssertEqual(number("position", events[0]), 30)
@@ -105,7 +101,6 @@ final class PlayerStateTransformerTests: XCTestCase {
 
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events[0].kind, .instant)
-        XCTAssertTrue(events[0].forcePulse)
         XCTAssertEqual(string("stop_reason", events[0]), "untracked")
     }
 }

@@ -97,13 +97,12 @@ final class DelayedEventTrackerTests: XCTestCase {
         XCTAssertEqual(body(0)?.ttlMs, 3_600_000)
     }
 
-    /// `forcePulse` is the retired trigger: PR 3 deletes the flag, this pins that nothing reads it.
-    func testForcePulseOnARefreshSendsNothing() {
+    func testARefreshSendsNothing() {
         let tracker = makeTracker()
         tracker.track(makeDelayed("a", type: "First"))
         waitForUploads(1)
 
-        tracker.track(makeDelayed("a", type: "Second", forcePulse: true))
+        tracker.track(makeDelayed("a", type: "Second"))
         withExtendedLifetime(tracker) { expectNoUpload(beyond: 1) }
     }
 
@@ -441,12 +440,8 @@ final class DelayedEventTrackerTests: XCTestCase {
                             snapshots: snapshots)
     }
 
-    private func makeDelayed(_ insertId: String,
-                             type: String = "Content Playing",
-                             forcePulse: Bool = false) -> DelayedEvent {
-        let event = DelayedEvent(copying: makeEvent(insertId, type: type), kind: .delayed)
-        if forcePulse { event.markForcePulse() }
-        return event
+    private func makeDelayed(_ insertId: String, type: String = "Content Playing") -> DelayedEvent {
+        DelayedEvent(copying: makeEvent(insertId, type: type), kind: .delayed)
     }
 
     private func makeInstant(_ insertId: String, type: String = "Content Playing") -> DelayedEvent {
