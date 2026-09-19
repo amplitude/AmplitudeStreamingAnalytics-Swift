@@ -20,10 +20,11 @@ final class DeinitFinalizationTests: XCTestCase {
             instanceName: "deinit-\(UUID().uuidString)",
             autocapture: [], offline: true))
         let config = StreamingAnalyticsConfig()
-        let configuration = DelayedEventsConfiguration(ttlMs: 1_234)
+        let configuration = DelayedEventsConfiguration(pulseInterval: 0.05, ttlMs: 1_234)
         let tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
                                           configuration: configuration,
-                                          httpClient: uploader)
+                                          httpClient: uploader,
+                                          snapshots: makeSnapshotStore())
         let transport = DelayedEvents(amplitude: amplitude, configuration: configuration, tracker: tracker)
 
         let player = FakePlayer()
@@ -194,10 +195,11 @@ final class DeinitOffQueueReadTests: XCTestCase {
             autocapture: [], offline: true))
         var config = StreamingAnalyticsConfig()
         config.sampleInterval = 3600
-        let configuration = DelayedEventsConfiguration(ttlMs: 1_234)
+        let configuration = DelayedEventsConfiguration(pulseInterval: 0.05, ttlMs: 1_234)
         let tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
                                           configuration: configuration,
-                                          httpClient: uploader)
+                                          httpClient: uploader,
+                                          snapshots: makeSnapshotStore())
         let transport = DelayedEvents(amplitude: amplitude, configuration: configuration, tracker: tracker)
 
         let player = FakePlayer()

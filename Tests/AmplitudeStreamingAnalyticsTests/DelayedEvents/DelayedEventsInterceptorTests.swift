@@ -27,7 +27,6 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         makeFacade()
 
         let event = DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed)
-        event.markForcePulse()
 
         XCTAssertNil(delayedEvents.execute(event: event))
 
@@ -47,7 +46,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         let wrapped = makeEvent("ins-1")
         wrapped.library = "amplitude-swift/1.18.6"
 
-        XCTAssertNil(delayedEvents.execute(event: forced(copying: wrapped)))
+        XCTAssertNil(delayedEvents.execute(event: DelayedEvent(copying: wrapped, kind: .delayed)))
 
         waitForUploads(1)
         XCTAssertEqual(uploader.bodies[0].events[0].library, "ours/1.2.3")
@@ -58,7 +57,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         let wrapped = makeEvent("ins-1")
         wrapped.library = "amplitude-swift/1.18.6"
 
-        XCTAssertNil(delayedEvents.execute(event: forced(copying: wrapped)))
+        XCTAssertNil(delayedEvents.execute(event: DelayedEvent(copying: wrapped, kind: .delayed)))
 
         waitForUploads(1)
         XCTAssertEqual(uploader.bodies[0].events[0].library, "amplitude-swift/1.18.6")
@@ -82,18 +81,16 @@ final class DelayedEventsInterceptorTests: XCTestCase {
     }
 
     func testRefreshingAnEntryReplacesItInPlace() {
-        makeFacade()
-        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1", type: "First"), kind: .delayed), forcePulse: true)
+        makeFacade(configuration: DelayedEventsConfiguration(pulseInterval: 0.05))
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1", type: "First"), kind: .delayed))
         waitForUploads(1)
 
-        // A refresh rides the next request rather than sending one of its own.
+        // A refresh rides the next pulse rather than sending a request of its own.
         delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1", type: "Second"), kind: .delayed))
-        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-2"), kind: .delayed), forcePulse: true)
-        waitForUploads(2)
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-2"), kind: .delayed))
+        let events = waitForUpload { $0.events.compactMap(\.insertId) == ["ins-1", "ins-2"] }.events
 
-        let events = uploader.bodies[1].events
-        XCTAssertEqual(events.compactMap(\.insertId), ["ins-1", "ins-2"], "replaced in place, not appended")
-        XCTAssertEqual(events[0].eventType, "Second")
+        XCTAssertEqual(events[0].eventType, "Second", "replaced in place, not appended")
         XCTAssertNotNil(events[0].platform, "refresh keeps its enrichment")
     }
 
@@ -117,7 +114,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         let event = makeEvent("ins-1")
         event.timestamp = 1_752_000_000_000
 
-        delayedEvents.track(DelayedEvent(copying: event, kind: .delayed), forcePulse: true)
+        delayedEvents.track(DelayedEvent(copying: event, kind: .delayed))
         waitForUploads(1)
 
         let sent = uploader.bodies[0].events[0]
@@ -134,7 +131,7 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         makeFacade(enrichment: spy)
 
         amplitude.track(event: makeEvent("ins-0", type: "Regular Event"))
-        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed), forcePulse: true)
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed))
         waitForUploads(1)
 
         XCTAssertTrue(spy.seen.contains("Regular Event"), "the spy must be reached by ordinary events")
@@ -143,30 +140,29 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     func testFacadeCarriesTheConfiguredTtlOntoTheWire() {
         makeFacade(configuration: DelayedEventsConfiguration(ttlMs: 1_234))
-        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed), forcePulse: true)
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed))
         waitForUploads(1)
 
         XCTAssertEqual(uploader.bodies[0].ttlMs, 1_234)
         XCTAssertEqual(delayedEvents.configuration.ttlMs, 1_234)
     }
 
-    /// Deterministic where a separate "send now" call would not be: the request is asked for by the
-    /// refresh itself, so it cannot overtake it across the timeline hop.
-    func testFacadeRefreshWithForcePulseGoesOutWithTheRefreshedValue() {
-        makeFacade()
-        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1", type: "First"), kind: .delayed), forcePulse: true)
+    /// `forcePulse` is the retired send trigger: the refreshed value waits for the pulse whether or
+    /// not the caller asked for one.
+    func testFacadeRefreshRidesThePulseEvenWhenForced() {
+        makeFacade(configuration: DelayedEventsConfiguration(pulseInterval: 0.05))
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1", type: "First"), kind: .delayed))
         waitForUploads(1)
 
         delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1", type: "Second"), kind: .delayed),
                             forcePulse: true)
-        waitForUploads(2)
-        XCTAssertEqual(uploader.bodies[1].events.map(\.eventType), ["Second"])
-        XCTAssertNotEqual(uploader.bodies[1].ttlMs, 0, "nothing is finalized")
+        let refreshed = waitForUpload { $0.events.map(\.eventType) == ["Second"] }
+        XCTAssertNotEqual(refreshed.ttlMs, 0, "nothing is finalized")
     }
 
     func testFacadeFlushFinalizesTheRow() {
         makeFacade()
-        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed), forcePulse: true)
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed))
         waitForUploads(1)
 
         delayedEvents.flush()
@@ -177,11 +173,11 @@ final class DelayedEventsInterceptorTests: XCTestCase {
 
     func testFacadeDiscardRotatesTheDelayId() {
         makeFacade()
-        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed), forcePulse: true)
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-1"), kind: .delayed))
         waitForUploads(1)
 
         delayedEvents.discard()
-        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-2"), kind: .delayed), forcePulse: true)
+        delayedEvents.track(DelayedEvent(copying: makeEvent("ins-2"), kind: .delayed))
         waitForUploads(2)
 
         XCTAssertNotEqual(uploader.bodies[0].id, uploader.bodies[1].id)
@@ -201,7 +197,8 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         }
         let tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
                                           configuration: configuration,
-                                          httpClient: uploader)
+                                          httpClient: uploader,
+                                          snapshots: makeSnapshotStore())
         delayedEvents = DelayedEvents(amplitude: amplitude, configuration: configuration, tracker: tracker)
     }
 
@@ -211,17 +208,19 @@ final class DelayedEventsInterceptorTests: XCTestCase {
         return event
     }
 
-    /// Force-pulsed so the upload goes out now rather than on the next pulse interval.
-    private func forced(copying event: BaseEvent) -> DelayedEvent {
-        let delayed = DelayedEvent(copying: event, kind: .delayed)
-        delayed.markForcePulse()
-        return delayed
-    }
-
     private func waitForUploads(_ count: Int, timeout: TimeInterval = 5) {
         let reached = expectation(description: "\(count) upload(s)")
         uploader.whenUploadCountReaches(count) { reached.fulfill() }
         wait(for: [reached], timeout: timeout)
+    }
+
+    @discardableResult
+    private func waitForUpload(timeout: TimeInterval = 5,
+                               where predicate: @escaping (DelayedRequestBody) -> Bool) -> DelayedRequestBody {
+        let matched = expectation(description: "upload matching predicate")
+        uploader.whenUploadArrives(matching: predicate) { matched.fulfill() }
+        wait(for: [matched], timeout: timeout)
+        return uploader.bodies.first(where: predicate) ?? uploader.bodies[0]
     }
 }
 

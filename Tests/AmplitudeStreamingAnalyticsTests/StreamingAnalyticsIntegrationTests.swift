@@ -57,10 +57,12 @@ final class StreamingAnalyticsIntegrationTests: XCTestCase {
 
     private func makeTransport(on amplitude: Amplitude,
                                uploading uploader: FakeDelayedEventsUploader) -> DelayedEvents {
-        let configuration = DelayedEventsConfiguration()
+        // A brisk pulse: the finalizing stop leaves the transport on one, not on the track itself.
+        let configuration = DelayedEventsConfiguration(pulseInterval: 0.05)
         let tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
                                           configuration: configuration,
-                                          httpClient: uploader)
+                                          httpClient: uploader,
+                                          snapshots: makeSnapshotStore())
         return DelayedEvents(amplitude: amplitude, configuration: configuration, tracker: tracker)
     }
 

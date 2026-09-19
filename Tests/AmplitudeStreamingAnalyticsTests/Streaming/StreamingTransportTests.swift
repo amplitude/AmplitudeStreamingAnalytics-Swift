@@ -11,10 +11,8 @@ final class StreamingTransportTests: XCTestCase {
     /// with no open snapshot left behind it.
     func testAPlayAndPauseFinalizeTheSnapshotRowOnTheWire() throws {
         let uploader = FakeDelayedEventsUploader()
-        let tracker = DelayedEventTracker(amplitudeConfiguration: Configuration(apiKey: "test-key"),
-                                          configuration: DelayedEventsConfiguration(pulseInterval: 600,
-                                                                                    ttlMs: 3_600_000),
-                                          httpClient: uploader)
+        uploader.autoSettle = .success(DelayedResponseBody(id: "d", expiration: 1, flushed: nil))
+        let tracker = makeTracker(uploading: uploader)
         let harness = PlayerObserverHarness(label: "forwarded")
         let transformer = PlayerStateTransformer(content: PlayerContent(contentId: "ep-1"))
         let at = Date(timeIntervalSince1970: 1_752_000_000)
@@ -22,28 +20,18 @@ final class StreamingTransportTests: XCTestCase {
             transformer.events(for: state, at: at).forEach { tracker.track($0) }
         }
 
-        // The opening request is left in flight: the tracker sends one at a time, so the pause lands in
-        // the live set before the next body is built, however the observer and tracker queues interleave.
-        let opened = expectation(description: "opening request")
-        uploader.whenUploadCountReaches(1) { opened.fulfill() }
         harness.handle(.played)
-        wait(for: [opened], timeout: 5)
-
-        let opening = uploader.bodies[0]
+        let opening = waitForUpload(on: uploader) { !$0.events.isEmpty }
         let snapshotId = try XCTUnwrap(opening.events.first?.insertId)
-        let streamSessionId = opening.instantEvents?.first?.eventProperties?["stream_session_id"] as? String
-        XCTAssertEqual(opening.instantEvents?.map(\.eventType), [StreamingEvents.startedType])
-        XCTAssertEqual((opening.instantEvents?.first as? DelayedEvent)?.forcePulse, true,
-                       "the STARTED is forced, which is why it went out ahead of the pulse")
+        XCTAssertEqual(opening.ttlMs, 3_600_000, "the pending stop's appearance opens the row")
+
+        let started = try XCTUnwrap(waitForUpload(on: uploader, matching: carriesStart)
+            .instantEvents?.first { $0.eventType == StreamingEvents.startedType })
+        let streamSessionId = started.eventProperties?["stream_session_id"] as? String
 
         harness.onQueue { harness.player.position = 30 }
         harness.handle(.paused)
-
-        let finalized = expectation(description: "finalizing request")
-        uploader.whenUploadArrives(matching: { body in body.finalizes(snapshotId) },
-                                   notify: { finalized.fulfill() })
-        uploader.settle(at: 0, with: .success(DelayedResponseBody(id: "d", expiration: 1, flushed: nil)))
-        wait(for: [finalized], timeout: 5)
+        waitForUpload(on: uploader) { $0.finalizes(snapshotId) }
 
         try withExtendedLifetime(tracker) {
             let bodies = uploader.bodies
@@ -52,8 +40,7 @@ final class StreamingTransportTests: XCTestCase {
             XCTAssertEqual(closing.ttlMs, 0, "nothing is left open, so the server ingests and deletes")
             XCTAssertTrue(closing.events.isEmpty, "the snapshot was replaced by its own finalizing stop")
 
-            let stopped = closing.instantEvents?.first
-            XCTAssertEqual(stopped?.eventType, StreamingEvents.stoppedType)
+            let stopped = closing.instantEvents?.first { $0.eventType == StreamingEvents.stoppedType }
             XCTAssertEqual(stopped?.eventProperties?["stop_reason"] as? String, "paused")
             XCTAssertEqual(stopped?.eventProperties?["stream_duration"] as? TimeInterval, 30)
             XCTAssertEqual(stopped?.eventProperties?["position"] as? TimeInterval, 30)
@@ -64,38 +51,53 @@ final class StreamingTransportTests: XCTestCase {
         }
     }
 
-    /// The STARTED is what forces the opening request, so the pending stop has to be tracked first: were the
-    /// caller preempted between the two, a start-first order would ship a request with no delayed entry, and
-    /// `ttl_ms: 0` has the server ingest and delete it — the play would then hold no row until the next pulse.
-    func testTheOpeningPendingStopNeverShipsWithoutTheStart() throws {
+    /// The pending stop is the row's first live entry, so its own appearance opens the row: the start
+    /// no longer has to be tracked last to keep a `ttl_ms: 0` request from ingesting an empty one. The
+    /// start is written either way and rides the first request that goes out.
+    func testTheOpeningPendingStopOpensTheRowOnItsOwn() {
         let uploader = FakeDelayedEventsUploader()
-        let tracker = DelayedEventTracker(amplitudeConfiguration: Configuration(apiKey: "test-key"),
-                                          configuration: DelayedEventsConfiguration(pulseInterval: 600,
-                                                                                    ttlMs: 3_600_000),
-                                          httpClient: uploader)
+        uploader.autoSettle = .success(DelayedResponseBody(id: "d", expiration: 1, flushed: nil))
+        let tracker = makeTracker(uploading: uploader)
         let transformer = PlayerStateTransformer(content: PlayerContent(contentId: "ep-1"))
         let state = PlayerState(phase: .playing, position: 0, duration: 100, watchTime: 0)
         let opening = transformer.events(for: state, at: Date(timeIntervalSince1970: 1_752_000_000))
 
-        XCTAssertEqual(opening.map(\.kind), [.delayed, .instant], "the forced instant must be tracked last")
+        XCTAssertEqual(opening.map(\.kind), [.delayed, .instant])
 
         tracker.track(opening[0])
-        let premature = expectation(description: "the pending stop alone forces nothing")
-        premature.isInverted = true
-        uploader.whenUploadCountReaches(1) { premature.fulfill() }
-        wait(for: [premature], timeout: 1)
-
         tracker.track(opening[1])
-        let sent = expectation(description: "the request the start forces")
-        uploader.whenUploadCountReaches(1) { sent.fulfill() }
-        wait(for: [sent], timeout: 5)
 
-        try withExtendedLifetime(tracker) {
-            let body = uploader.bodies[0]
-            XCTAssertEqual(body.events.map(\.insertId), [opening[0].insertId], "the row rides the start's request")
-            XCTAssertEqual(body.instantEvents?.map(\.insertId), [opening[1].insertId])
-            XCTAssertEqual(body.ttlMs, 3_600_000, "a body carrying a delayed entry keeps the row alive")
+        let opened = waitForUpload(on: uploader) { !$0.events.isEmpty }
+        XCTAssertEqual(opened.events.map(\.insertId), [opening[0].insertId])
+        XCTAssertEqual(opened.ttlMs, 3_600_000, "a body carrying a delayed entry keeps the row alive")
+
+        withExtendedLifetime(tracker) {
+            _ = waitForUpload(on: uploader) { body in
+                body.instantEvents?.contains { $0.insertId == opening[1].insertId } == true
+            }
         }
+    }
+
+    private let carriesStart: (DelayedRequestBody) -> Bool = { body in
+        body.instantEvents?.contains { $0.eventType == StreamingEvents.startedType } == true
+    }
+
+    /// A brisk pulse: past the row's appearance, nothing but the pulse sends.
+    private func makeTracker(uploading uploader: FakeDelayedEventsUploader) -> DelayedEventTracker {
+        DelayedEventTracker(amplitudeConfiguration: Configuration(apiKey: "test-key"),
+                            configuration: DelayedEventsConfiguration(pulseInterval: 0.05,
+                                                                      ttlMs: 3_600_000),
+                            httpClient: uploader,
+                            snapshots: makeSnapshotStore())
+    }
+
+    @discardableResult
+    private func waitForUpload(on uploader: FakeDelayedEventsUploader,
+                               matching predicate: @escaping (DelayedRequestBody) -> Bool) -> DelayedRequestBody {
+        let arrived = expectation(description: "matching upload")
+        uploader.whenUploadArrives(matching: predicate) { arrived.fulfill() }
+        wait(for: [arrived], timeout: 5)
+        return uploader.bodies.first(where: predicate) ?? uploader.bodies[0]
     }
 }
 

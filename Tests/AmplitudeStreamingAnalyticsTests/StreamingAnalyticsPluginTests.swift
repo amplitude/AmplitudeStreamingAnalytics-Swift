@@ -50,10 +50,12 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
     /// A distinctive TTL, so a test can tell this transport's configuration from the default.
     /// Both collaborators are explicit: one test builds its own pair and must not reach the shared ones.
     private func makeTransport(on amplitude: Amplitude, uploading uploader: FakeDelayedEventsUploader) -> DelayedEvents {
-        let configuration = DelayedEventsConfiguration(ttlMs: 1_234)
+        // A brisk pulse: a finalizing stop leaves the transport on one, not on the track itself.
+        let configuration = DelayedEventsConfiguration(pulseInterval: 0.05, ttlMs: 1_234)
         let tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
                                           configuration: configuration,
-                                          httpClient: uploader)
+                                          httpClient: uploader,
+                                          snapshots: makeSnapshotStore())
         return DelayedEvents(amplitude: amplitude, configuration: configuration, tracker: tracker)
     }
 
@@ -113,7 +115,8 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         let configuration = DelayedEventsConfiguration(pulseInterval: 0.05, ttlMs: 1_234)
         let tracker = DelayedEventTracker(amplitudeConfiguration: host.configuration,
                                           configuration: configuration,
-                                          httpClient: ownUploader)
+                                          httpClient: ownUploader,
+                                          snapshots: makeSnapshotStore())
         let transport = DelayedEvents(amplitude: host, configuration: configuration, tracker: tracker)
 
         var config = StreamingAnalyticsConfig()
@@ -252,13 +255,15 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
                                                           autocapture: [],
                                                           offline: true))
         let ownUploader = FakeDelayedEventsUploader()
+        let ownSnapshots = makeSnapshotStore()
         let integrator = StreamingAnalyticsPlugin(
             config: StreamingAnalyticsConfig(),
             delayedEventsFactory: { amplitude, configuration in
                 built = configuration
                 let tracker = DelayedEventTracker(amplitudeConfiguration: amplitude.configuration,
                                                   configuration: configuration,
-                                                  httpClient: ownUploader)
+                                                  httpClient: ownUploader,
+                                                  snapshots: ownSnapshots)
                 return DelayedEvents(amplitude: amplitude, configuration: configuration, tracker: tracker)
             },
             pulseTimerFactory: PulseTimer.init)
