@@ -42,9 +42,16 @@ permissions:
   contents: write
   pull-requests: write
 
+# Queue, never cancel: a run killed between the tag and the release leaves a
+# tag the ruleset will not let anyone move or delete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-please:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Generate GitHub App token
         id: app-token
