@@ -2,9 +2,8 @@ name: Unit Test
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+  # No push trigger: on main this runs as release-please's `verify` job instead,
+  # so the matrix gates the tag rather than racing it.
   workflow_call:
 
 permissions:

@@ -49,7 +49,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Test before tagging: once a tag exists, the ruleset won't let it move.
+  verify:
+    uses: ./.github/workflows/unit-test.yml
+
   release-please:
+    needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
