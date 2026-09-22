@@ -15,7 +15,8 @@ let package = Package(
         .target(
             name: "AmplitudeStreamingAnalytics",
             dependencies: [.product(name: "AmplitudeSwift", package: "Amplitude-Swift")],
-            path: "Sources/AmplitudeStreamingAnalytics"
+            path: "Sources/AmplitudeStreamingAnalytics",
+            resources: [.copy("PrivacyInfo.xcprivacy")]
         ),
         .testTarget(
             name: "AmplitudeStreamingAnalyticsTests",
