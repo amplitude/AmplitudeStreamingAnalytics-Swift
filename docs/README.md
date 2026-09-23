@@ -7,7 +7,7 @@
 > These pages describe the Alpha. They will be removed at GA, when [the Amplitude docsite](https://amplitude.com/docs) takes over.
 
 **Package:** AmplitudeStreamingAnalytics
-**Latest version:** unreleased; install by commit SHA
+**Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
 
 Reference for the Alpha of Amplitude's Streaming Analytics SDK for Apple platforms. Installation
 is in the [root README](../README.md).

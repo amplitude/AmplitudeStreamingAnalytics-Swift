@@ -2,5 +2,5 @@
 /// trailing marker is what it looks for, so do not edit either by hand.
 enum StreamingAnalyticsInfo {
     static let library = "streaming-analytics-swift"
-    static let version = "0.0.0" // x-release-please-version
+    static let version = "0.1.0-alpha.1" // x-release-please-version
 }

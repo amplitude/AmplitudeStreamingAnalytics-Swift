@@ -22,13 +22,16 @@ iOS 13.0+, tvOS 13.0+, and macOS 10.15+. Requires Amplitude-Swift 1.18.6 or late
 
 ## Installation
 
-Swift Package Manager. There are no tagged releases during the Alpha, so pin a commit SHA:
+Swift Package Manager. Alpha releases can break the API from one to the next, so pin an exact
+version:
 
+<!-- x-release-please-start-version -->
 ```swift
 dependencies: [
-    .package(url: "https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git", revision: "<commit-sha>")
+    .package(url: "https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git", exact: "0.1.0-alpha.1")
 ]
 ```
+<!-- x-release-please-end -->
 
 ## Quickstart
 

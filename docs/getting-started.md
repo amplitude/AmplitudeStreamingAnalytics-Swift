@@ -7,7 +7,7 @@
 > These pages describe the Alpha. They will be removed at GA, when [the Amplitude docsite](https://amplitude.com/docs) takes over.
 
 **Package:** AmplitudeStreamingAnalytics
-**Latest version:** unreleased; install by commit SHA
+**Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
 
 Amplitude Streaming Analytics reports what your users watch as Amplitude events.
 
@@ -23,17 +23,19 @@ You need:
 
 ### Install
 
-There are no tagged releases during the Alpha, so pin a commit SHA:
+Alpha releases can break the API from one to the next, so pin an exact version:
 
+<!-- x-release-please-start-version -->
 ```swift
 dependencies: [
-    .package(url: "https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git", revision: "<commit-sha>")
+    .package(url: "https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git", exact: "0.1.0-alpha.1")
 ]
 ```
 
 In Xcode, use **File > Add Package Dependencies…**, enter
-`https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git`, choose **Branch/Commit**,
-and paste the SHA.
+`https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git`, choose **Exact Version**,
+and enter `0.1.0-alpha.1`.
+<!-- x-release-please-end -->
 
 ### Configure your application code
 

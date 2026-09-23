@@ -7,7 +7,7 @@
 > These pages describe the Alpha. They will be removed at GA, when [the Amplitude docsite](https://amplitude.com/docs) takes over.
 
 **Package:** AmplitudeStreamingAnalytics
-**Latest version:** unreleased; install by commit SHA
+**Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
 
 `PlayerContent` describes the content you are tracking. Pass it to `trackPlayer(player:content:)`
 when you start a viewing. See [Getting started](getting-started.md).
