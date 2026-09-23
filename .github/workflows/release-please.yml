@@ -5,28 +5,21 @@
 # tag this workflow creates, so tagging *is* publishing. There is no separate
 # publish job, and no CocoaPods push — this SDK ships no podspec.
 #
-# `release-type` is "simple" because release-please has no Swift updater. Files
-# carrying a version string are listed under `extra-files` and annotated with
-# `x-release-please-version`.
+# amplitude/actions/release-please-action reimplements release-please rather than
+# wrapping it. It supports no `bootstrap-sha` and no `Release-As` footer, and it
+# finds the commits to release by comparing against the tag for the manifest
+# version. That tag must exist: without it the action proposes nothing. The first
+# release, v0.1.0-alpha.1, was tagged by hand for that reason.
 #
-# `prerelease-type` carries its own ".1" on purpose. release-please only appends
-# a number when it bumps a prerelease that already has one, so plain "alpha"
-# would make the first tag v0.1.0-alpha and only the second v0.1.0-alpha.1.
-#
-# `bump-patch-for-minor-pre-major` is false so the first release is v0.1.0-alpha.1
-# rather than v0.0.1-alpha.1. The prerelease strategy keeps a breaking change on
-# the alpha train only while the patch component is 0: from 0.0.1-alpha.n a single
-# feat! would have released 0.1.0 with no alpha suffix at all.
+# Files carrying a version string are listed under `extra-files` and annotated
+# with `x-release-please-version`.
 #
 # === Graduating from alpha to stable 1.0.0 ===
 #
-# 1. In release-please-config.json set "prerelease": false and remove
-#    "prerelease-type" and "versioning".
-# 2. Land the graduating commit with a "Release-As: 1.0.0" footer. Without it the
-#    next release is an ordinary semver bump of the current 0.x version, not
-#    1.0.0.
-# 3. After that, remove "bump-minor-pre-major" and "bump-patch-for-minor-pre-major"
-#    so standard semver applies: fix -> patch, feat -> minor, feat!/fix! -> major.
+# In one PR, remove "versioning", "prerelease" and "bump-minor-pre-major" from
+# release-please-config.json, and title it as a breaking change, e.g.
+# "feat(sdk)!: graduate to 1.0.0". Only a breaking change takes 0.x to 1.0.0; a
+# plain feat would release 0.2.0.
 
 name: Release Please
 
@@ -38,9 +31,8 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-permissions:
-  contents: write
-  pull-requests: write
+# Every write goes through the App token; GITHUB_TOKEN needs nothing.
+permissions: {}
 
 # Queue, never cancel: a run killed between the tag and the release leaves a
 # tag the ruleset will not let anyone move or delete.
@@ -51,12 +43,16 @@ concurrency:
 jobs:
   # Test before tagging: once a tag exists, the ruleset won't let it move.
   verify:
+    permissions:
+      contents: read
     uses: ./.github/workflows/unit-test.yml
 
   release-please:
     needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # The App key lives in this environment, which only main can deploy to.
+    environment: release
     steps:
       - name: Generate GitHub App token
         id: app-token
@@ -64,8 +60,11 @@ jobs:
         with:
           app-id: ${{ secrets.SDK_RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.SDK_RELEASE_BOT_PRIVATE_KEY }}
+          # Labels go through the pull-requests grant; no issues access needed.
+          permission-contents: write
+          permission-pull-requests: write
 
-      - uses: amplitude/actions/release-please-action@8091f292e3d0337c43e97e52e639192b64963021 # v0
+      - uses: amplitude/actions/release-please-action@820754f06b23ec4138c65c07dae4131a46011020 # v0
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
