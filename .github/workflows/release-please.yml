@@ -8,8 +8,8 @@
 # amplitude/actions/release-please-action reimplements release-please rather than
 # wrapping it. It supports no `bootstrap-sha` and no `Release-As` footer, and it
 # finds the commits to release by comparing against the tag for the manifest
-# version. That tag must exist: without it the action proposes nothing. The first
-# release, v0.1.0-alpha.1, was tagged by hand for that reason.
+# version. That tag must exist: without it the action proposes nothing, which is
+# why the first release, v0.1.0-alpha.1, is tagged by hand (#50).
 #
 # Files carrying a version string are listed under `extra-files` and annotated
 # with `x-release-please-version`.
