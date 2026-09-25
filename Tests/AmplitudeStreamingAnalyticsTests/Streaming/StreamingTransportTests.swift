@@ -55,7 +55,7 @@ final class StreamingTransportTests: XCTestCase {
             let stopped = closing.instantEvents?.first
             XCTAssertEqual(stopped?.eventType, StreamingEvents.stoppedType)
             XCTAssertEqual(stopped?.eventProperties?["stop_reason"] as? String, "paused")
-            XCTAssertEqual(stopped?.eventProperties?["stream_duration"] as? TimeInterval, 30)
+            XCTAssertEqual(stopped?.eventProperties?["play_time"] as? TimeInterval, 30)
             XCTAssertEqual(stopped?.eventProperties?["position"] as? TimeInterval, 30)
             XCTAssertEqual(stopped?.eventProperties?["stream_session_id"] as? String, streamSessionId)
 
@@ -74,7 +74,7 @@ final class StreamingTransportTests: XCTestCase {
                                                                                     ttlMs: 3_600_000),
                                           httpClient: uploader)
         let transformer = PlayerStateTransformer(content: PlayerContent(contentId: "ep-1"))
-        let state = PlayerState(phase: .playing, position: 0, duration: 100, watchTime: 0)
+        let state = PlayerState(phase: .playing, position: 0, duration: 100, playTime: 0)
         let opening = transformer.events(for: state, at: Date(timeIntervalSince1970: 1_752_000_000))
 
         XCTAssertEqual(opening.map(\.kind), [.delayed, .instant], "the forced instant must be tracked last")

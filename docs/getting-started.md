@@ -95,7 +95,7 @@ playback.
 - Give the player an item before you track it. `trackPlayer(player:content:)` looks at
   `AVPlayer.currentItem` once, when you call it, and attaches the observers that report the item
   finishing, failing, or seeking. Track a player that has no item yet and you lose all three for
-  that item: no `ended`, no `error`, and forward seeks counted as watched time.
+  that item: no `ended`, no `error`, and forward seeks counted as play time.
 - The SDK does not follow `replaceCurrentItem`. The viewing keeps reporting under the
   `PlayerContent` you started it with, so the next video's events carry the previous video's
   `content_id`. Call `stopTracking(player:)`, then `trackPlayer(player:content:)` with the new

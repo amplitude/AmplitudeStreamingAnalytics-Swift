@@ -24,19 +24,19 @@ final class StreamingEventsTests: XCTestCase {
         XCTAssertEqual(props["duration"] as? TimeInterval, 100)
         XCTAssertEqual(props["start_time"] as? TimeInterval, 10)
         XCTAssertEqual(props["position"] as? TimeInterval, 10)
-        XCTAssertNil(props["stream_duration"])
+        XCTAssertNil(props["play_time"])
         XCTAssertNil(props["stop_reason"])
     }
 
     func testStoppedCarriesProgressAndReason() {
         let event = StreamingEvents.stopped(content: PlayerContent(contentId: "ep-1", deliveryMode: .onDemand),
-                                            state: state(position: 25, duration: 100, streamDuration: 20, reason: .paused))
+                                            state: state(position: 25, duration: 100, playTime: 20, reason: .paused))
 
         XCTAssertEqual(event.eventType, "[Amplitude] Stream Stopped")
         let props = event.eventProperties!
         XCTAssertEqual(props["position"] as? TimeInterval, 25)
         XCTAssertEqual(props["start_time"] as? TimeInterval, 10)
-        XCTAssertEqual(props["stream_duration"] as? TimeInterval, 20)
+        XCTAssertEqual(props["play_time"] as? TimeInterval, 20)
         XCTAssertEqual(props["percent_completed"] as? Double, 25)
         XCTAssertEqual(props["stop_reason"] as? String, "paused")
         XCTAssertNil(props["error_message"])
@@ -93,12 +93,12 @@ final class StreamingEventsTests: XCTestCase {
 
     private func state(position: TimeInterval,
                        duration: TimeInterval?,
-                       streamDuration: TimeInterval = 0,
+                       playTime: TimeInterval = 0,
                        reason: StreamingStopReason? = nil,
                        errorMessage: String? = nil,
                        insertId: String = "stop-1") -> StreamingState {
         StreamingState(streamSessionId: "vs-1", playId: "play-1", insertId: insertId, at: at,
                        startTime: 10, position: position, duration: duration,
-                       streamDuration: streamDuration, stopReason: reason, errorMessage: errorMessage)
+                       playTime: playTime, stopReason: reason, errorMessage: errorMessage)
     }
 }

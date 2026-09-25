@@ -15,14 +15,14 @@ final class PlayerStateTransformerTests: XCTestCase {
     private func state(_ phase: PlayerState.Phase,
                        position: TimeInterval = 0,
                        duration: TimeInterval? = 100,
-                       watchTime: TimeInterval = 0) -> PlayerState {
-        PlayerState(phase: phase, position: position, duration: duration, watchTime: watchTime)
+                       playTime: TimeInterval = 0) -> PlayerState {
+        PlayerState(phase: phase, position: position, duration: duration, playTime: playTime)
     }
 
     private func emit(_ phase: PlayerState.Phase,
                       position: TimeInterval = 0,
-                      watchTime: TimeInterval = 0) -> [DelayedEvent] {
-        transformer.events(for: state(phase, position: position, watchTime: watchTime), at: at)
+                      playTime: TimeInterval = 0) -> [DelayedEvent] {
+        transformer.events(for: state(phase, position: position, playTime: playTime), at: at)
     }
 
     private func string(_ name: String, _ event: DelayedEvent) -> String? { event.eventProperties?[name] as? String }
@@ -46,7 +46,7 @@ final class PlayerStateTransformerTests: XCTestCase {
 
     func testATickWhilePlayingRefreshesTheSnapshotInPlace() {
         let snapshot = emit(.playing, position: 10)[0]
-        let events = emit(.playing, position: 15, watchTime: 5)
+        let events = emit(.playing, position: 15, playTime: 5)
 
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events[0].kind, .delayed)
@@ -54,12 +54,12 @@ final class PlayerStateTransformerTests: XCTestCase {
         XCTAssertEqual(events[0].insertId, snapshot.insertId)
         XCTAssertEqual(string("stop_reason", events[0]), "timeout")
         XCTAssertEqual(number("position", events[0]), 15)
-        XCTAssertEqual(number("stream_duration", events[0]), 5)
+        XCTAssertEqual(number("play_time", events[0]), 5)
     }
 
     func testLeavingPlayingFinalizesTheRowWithTheReason() {
         let snapshot = emit(.playing)[0]
-        let events = emit(.stopped(.paused), position: 30, watchTime: 30)
+        let events = emit(.stopped(.paused), position: 30, playTime: 30)
 
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events[0].kind, .instant)
@@ -67,13 +67,13 @@ final class PlayerStateTransformerTests: XCTestCase {
         XCTAssertEqual(events[0].insertId, snapshot.insertId, "the same row, finalized")
         XCTAssertEqual(string("stop_reason", events[0]), "paused")
         XCTAssertEqual(number("position", events[0]), 30)
-        XCTAssertEqual(number("stream_duration", events[0]), 30)
+        XCTAssertEqual(number("play_time", events[0]), 30)
         XCTAssertNil(string("error_message", events[0]))
     }
 
     func testAnErrorCarriesItsMessage() {
         _ = emit(.playing)
-        let events = emit(.stopped(.error(message: "boom")), position: 20, watchTime: 20)
+        let events = emit(.stopped(.error(message: "boom")), position: 20, playTime: 20)
 
         XCTAssertEqual(string("stop_reason", events[0]), "error")
         XCTAssertEqual(string("error_message", events[0]), "boom")
@@ -81,14 +81,14 @@ final class PlayerStateTransformerTests: XCTestCase {
 
     func testAReplayGetsANewPlayIdUnderTheSameStreamSession() {
         let first = emit(.playing)
-        _ = emit(.stopped(.ended), position: 100, watchTime: 100)
-        let replay = emit(.playing, position: 0, watchTime: 100)
+        _ = emit(.stopped(.ended), position: 100, playTime: 100)
+        let replay = emit(.playing, position: 0, playTime: 100)
 
         XCTAssertEqual(replay.count, 2)
         XCTAssertNotEqual(string("play_id", replay[1]), string("play_id", first[1]))
         XCTAssertNotEqual(replay[0].insertId, first[0].insertId, "a fresh pending stop")
         XCTAssertEqual(string("stream_session_id", replay[1]), string("stream_session_id", first[1]))
-        XCTAssertEqual(number("stream_duration", replay[0]), 100, "cumulative across plays")
+        XCTAssertEqual(number("play_time", replay[0]), 100, "cumulative across plays")
     }
 
     func testNothingIsEmittedOutsideAPlay() {
@@ -101,7 +101,7 @@ final class PlayerStateTransformerTests: XCTestCase {
 
     func testFinalStraightFromPlayingClosesTheRowAsUntracked() {
         _ = emit(.playing)
-        let events = emit(.final, position: 12, watchTime: 12)
+        let events = emit(.final, position: 12, playTime: 12)
 
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events[0].kind, .instant)

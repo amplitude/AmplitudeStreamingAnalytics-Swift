@@ -49,7 +49,7 @@ Which keys the SDK sets depends on the event. See [Events](events.md) for what e
 | `content_id` | when `PlayerContent.contentId` is set | same |
 | `title` | when `PlayerContent.title` is set | same |
 | `duration` | when the player knows the item's duration | same |
-| `stream_duration` | never | always |
+| `play_time` | never | always |
 | `percent_completed` | never | when the player knows the item's duration |
 | `stop_reason` | never | always |
 | `error_message` | never | when the player reported an error message |
@@ -67,7 +67,7 @@ quietly:
 
 - A conditional key such as `content_id` lets your value through only while the SDK has no value
   of its own. The moment you set `contentId`, your property disappears from the data.
-- `stream_duration`, `percent_completed`, `stop_reason` and `error_message` reach every Started
+- `play_time`, `percent_completed`, `stop_reason` and `error_message` reach every Started
   event intact, because the SDK sets them only on Stopped events. The same key then means one
   thing on your Started events and another on your Stopped events, in the same viewing, with no
   error to tell you.
