@@ -1,12 +1,12 @@
 # Getting started
 
-> **Alpha.** This SDK is ready to use in production, but nothing in it is final. The public API, the internal behaviour, and the events it sends can all change before GA.
+> **Alpha.** Nothing in this SDK is final. The public API, the internal behaviour, and the events it sends can change in any release.
 
 > **Note:** Scope
 >
-> These pages describe the Alpha. They will be removed at GA, when [the Amplitude docsite](https://amplitude.com/docs) takes over.
+> These pages describe the Alpha.
 
-**Package:** AmplitudeStreamingAnalytics
+**Module:** AmplitudeStreamingAnalytics
 **Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
 
 Amplitude Streaming Analytics reports what your users watch as Amplitude events.
@@ -16,7 +16,8 @@ Amplitude Streaming Analytics reports what your users watch as Amplitude events.
 You need:
 
 - iOS 13.0+, tvOS 13.0+, or macOS 10.15+
-- Amplitude-Swift 1.18.6 or later
+- Amplitude-Swift 1.18.6 up to, but not including, 2.0.0
+- Xcode 15+ (Swift 5.9), the package's `swift-tools-version`
 - An Amplitude project and its API key
 
 ## Quickstart
@@ -29,17 +30,25 @@ Alpha releases can break the API from one to the next, so pin an exact version:
 ```swift
 dependencies: [
     .package(url: "https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git", exact: "0.1.0-alpha.1")
+],
+targets: [
+    .target(
+        name: "YourApp",
+        dependencies: [.product(name: "AmplitudeStreamingAnalytics", package: "AmplitudeStreamingAnalytics-Swift")]
+    )
 ]
 ```
 
 In Xcode, use **File > Add Package Dependencies…**, enter
 `https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git`, choose **Exact Version**,
-and enter `0.1.0-alpha.1`.
+enter `0.1.0-alpha.1`, and add the `AmplitudeStreamingAnalytics` library to your app target.
 <!-- x-release-please-end -->
 
 ### Configure your application code
 
-Add `StreamingAnalyticsPlugin` to your `Amplitude` instance once, at startup:
+Add `StreamingAnalyticsPlugin` to your `Amplitude` instance once, at startup, before your first
+`trackPlayer(player:content:)`. A player tracked before the plugin is added is not tracked, and
+the SDK logs an error:
 
 ```swift
 import AmplitudeSwift
@@ -90,7 +99,7 @@ playback.
 
 > **Tip:** Tracking also ends on its own
 >
-> You do not have to call `stopTracking(player:)` when a screen goes away. The SDK holds the `AVPlayer` weakly and ends the viewing when the player deallocates, sending the same closing event an explicit `stopTracking(player:)` would.
+> You do not have to call `stopTracking(player:)` when a screen goes away. The SDK holds the `AVPlayer` weakly and ends the viewing when the player deallocates, sending the same closing event an explicit `stopTracking(player:)` would, with `stop_reason` `untracked`. The SDK cannot read a player that is deallocating, so that event carries the position and watch time from its last reading, taken up to a second earlier.
 
 ## Known limitations
 
@@ -100,5 +109,6 @@ playback.
   that item: no `ended`, no `error`, and forward seeks counted as play time.
 - The SDK does not follow `replaceCurrentItem`. The viewing keeps reporting under the
   `PlayerContent` you started it with, so the next video's events carry the previous video's
-  `content_id`. Call `stopTracking(player:)`, then `trackPlayer(player:content:)` with the new
-  content.
+  `content_id`. The item observers also stay on the first item, so the new item reports no
+  `ended` and no `error`, and forward seeks in it count as watched time. Call
+  `stopTracking(player:)`, then `trackPlayer(player:content:)` with the new content.
