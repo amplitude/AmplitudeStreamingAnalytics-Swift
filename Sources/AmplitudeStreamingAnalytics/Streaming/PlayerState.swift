@@ -19,7 +19,7 @@ struct PlayerState: Equatable {
     var phase: Phase = .idle
     var position: TimeInterval = 0
     var duration: TimeInterval?
-    var watchTime: TimeInterval = 0
+    var playTime: TimeInterval = 0
 
     func with(_ change: (inout PlayerState) -> Void) -> PlayerState {
         var copy = self

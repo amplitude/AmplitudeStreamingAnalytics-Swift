@@ -4,7 +4,7 @@ import ObjectiveC
 
 /// `Player` over an `AVPlayer`, held weakly so the session ends when the app's player goes away. Seeks come from
 /// `AVPlayerItemTimeJumped`, which fires only after the playhead moves: `.seeked` is sent, `.seeking` is not, and
-/// watch time runs ~half a poll interval short per seek. `replaceCurrentItem` is not followed — stop and re-track.
+/// play time runs ~half a poll interval short per seek. `replaceCurrentItem` is not followed — stop and re-track.
 final class AVPlayerAdapter: Player {
     private weak var player: AVPlayer?
     private var lastKnown = Playhead(position: 0, duration: nil)

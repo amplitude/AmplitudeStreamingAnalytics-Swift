@@ -110,7 +110,7 @@ final class PlayerObserver {
         queue.async { [onChange] in onChange(next) }
     }
 
-    /// The vetted playhead applied to `state`; while playing, its advance is booked as watch time.
+    /// The vetted playhead applied to `state`; while playing, its advance is booked as play time.
     private func read(accruing: Bool = true) -> PlayerState {
         let playhead = player.playhead()
 
@@ -126,7 +126,7 @@ final class PlayerObserver {
         let isPlayback = accruing && !isSeeking && state.phase == .playing
         let advance = isPlayback ? max(0, position - state.position) : 0
 
-        return state.with { $0.position = position; $0.duration = duration; $0.watchTime += advance }
+        return state.with { $0.position = position; $0.duration = duration; $0.playTime += advance }
     }
 
     private func ignore(_ event: PlayerEvent) {

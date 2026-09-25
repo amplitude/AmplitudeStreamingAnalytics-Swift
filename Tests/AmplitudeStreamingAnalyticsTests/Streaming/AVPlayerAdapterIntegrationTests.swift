@@ -120,7 +120,7 @@ final class AVPlayerAdapterIntegrationTests: XCTestCase {
     }
 
     /// The reason `AVPlayerItemTimeJumped` is used instead of polling the playhead: a seek this small is
-    /// below any practical polling threshold, and polling books it as ordinary watch time.
+    /// below any practical polling threshold, and polling books it as ordinary play time.
     func testSeekTooSmallForPollingIsStillReported() {
         let player = AVPlayer(url: assetURL)
         let sut = AVPlayerAdapter(player)

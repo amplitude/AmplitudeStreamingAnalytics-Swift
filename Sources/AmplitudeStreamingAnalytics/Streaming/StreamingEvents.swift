@@ -3,11 +3,10 @@ import Foundation
 
 /// The only place the wire taxonomy is spelled out. Pure functions.
 enum StreamingEvents {
-    static let startedType = "[Amplitude] Stream Started"
-    static let stoppedType = "[Amplitude] Stream Stopped"
+    static let startedType = "[Streaming] Stream Started"
+    static let stoppedType = "[Streaming] Stream Stopped"
 
-    /// v1 tracks `AVPlayer` video. Audio gets its own value rather than its own event types.
-    private static let mediaType = "video"
+    private static let mediaType = StreamingMediaType.video
 
     static func started(content: PlayerContent, state: StreamingState) -> DelayedEvent {
         makeEvent(type: startedType,
@@ -20,15 +19,16 @@ enum StreamingEvents {
     /// delayed lane; every other reason is what finalizes that row.
     static func stopped(content: PlayerContent, state: StreamingState) -> DelayedEvent {
         var properties = baseProperties(content: content, state: state)
-        properties["stream_duration"] = state.streamDuration
+        properties["[Streaming] Play Time Sec"] = state.playTime
+        properties["[Streaming] Play Time Total Sec"] = state.playTimeTotal
         if let duration = state.duration {
-            properties["percent_completed"] = percentCompleted(position: state.position, duration: duration)
+            properties["[Streaming] Percent Completed"] = percentCompleted(position: state.position, duration: duration)
         }
         if let stopReason = state.stopReason {
-            properties["stop_reason"] = stopReason.rawValue
+            properties["[Streaming] Stop Reason"] = stopReason.rawValue
         }
         if let errorMessage = state.errorMessage {
-            properties["error_message"] = errorMessage
+            properties["[Streaming] Error Message"] = errorMessage
         }
         return makeEvent(type: stoppedType,
                          state: state,
@@ -39,20 +39,20 @@ enum StreamingEvents {
     private static func baseProperties(content: PlayerContent, state: StreamingState) -> [String: Any] {
         var properties = content.extraEventProperties
         if let contentId = content.contentId {
-            properties["content_id"] = contentId
+            properties["[Streaming] Content ID"] = contentId
         }
         if let title = content.title {
-            properties["title"] = title
+            properties["[Streaming] Title"] = title
         }
-        properties["media_type"] = mediaType
-        properties["delivery_mode"] = (content.deliveryMode ?? (state.duration == nil ? .live : .onDemand)).rawValue
-        properties["stream_session_id"] = state.streamSessionId
-        properties["play_id"] = state.playId
+        properties["[Streaming] Media Type"] = mediaType.rawValue
+        properties["[Streaming] Delivery Mode"] = (content.deliveryMode ?? (state.duration == nil ? .live : .onDemand)).rawValue
+        properties["[Streaming] Stream Session ID"] = state.streamSessionId
+        properties["[Streaming] Play ID"] = state.playId
         if let duration = state.duration {
-            properties["duration"] = duration
+            properties["[Streaming] Duration Sec"] = duration
         }
-        properties["start_time"] = state.startTime
-        properties["position"] = state.position
+        properties["[Streaming] Start Position Sec"] = state.startPosition
+        properties["[Streaming] Position Sec"] = state.position
         return properties
     }
 
