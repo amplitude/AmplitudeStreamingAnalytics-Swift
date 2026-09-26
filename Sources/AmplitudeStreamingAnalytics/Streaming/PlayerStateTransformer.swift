@@ -83,7 +83,7 @@ final class PlayerStateTransformer {
                        startTime: play.startTime,
                        position: state.position,
                        duration: state.duration,
-                       streamDuration: state.watchTime,
+                       playTime: state.playTime,
                        stopReason: stopReason,
                        errorMessage: errorMessage)
     }

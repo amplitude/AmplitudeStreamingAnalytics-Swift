@@ -75,7 +75,7 @@ private final class StreamActivityRecorder: BeforePlugin {
         var parts: [String] = []
         if let title = props["title"] as? String { parts.append(title) }
         if let deliveryMode = props["delivery_mode"] as? String { parts.append(deliveryMode) }
-        if let duration = props["stream_duration"] as? Double { parts.append(String(format: "%.0fs", duration)) }
+        if let duration = props["play_time"] as? Double { parts.append(String(format: "%.0fs", duration)) }
         if let percent = props["percent_completed"] as? Double { parts.append(String(format: "%.0f%%", percent)) }
         if let reason = props["stop_reason"] as? String { parts.append(reason) }
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")

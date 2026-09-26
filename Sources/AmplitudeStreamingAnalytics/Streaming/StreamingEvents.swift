@@ -6,8 +6,7 @@ enum StreamingEvents {
     static let startedType = "[Amplitude] Stream Started"
     static let stoppedType = "[Amplitude] Stream Stopped"
 
-    /// v1 tracks `AVPlayer` video. Audio gets its own value rather than its own event types.
-    private static let mediaType = "video"
+    private static let mediaType = StreamingMediaType.video
 
     static func started(content: PlayerContent, state: StreamingState) -> DelayedEvent {
         makeEvent(type: startedType,
@@ -20,7 +19,7 @@ enum StreamingEvents {
     /// delayed lane; every other reason is what finalizes that row.
     static func stopped(content: PlayerContent, state: StreamingState) -> DelayedEvent {
         var properties = baseProperties(content: content, state: state)
-        properties["stream_duration"] = state.streamDuration
+        properties["play_time"] = state.playTime
         if let duration = state.duration {
             properties["percent_completed"] = percentCompleted(position: state.position, duration: duration)
         }
@@ -44,7 +43,7 @@ enum StreamingEvents {
         if let title = content.title {
             properties["title"] = title
         }
-        properties["media_type"] = mediaType
+        properties["media_type"] = mediaType.rawValue
         properties["delivery_mode"] = (content.deliveryMode ?? (state.duration == nil ? .live : .onDemand)).rawValue
         properties["stream_session_id"] = state.streamSessionId
         properties["play_id"] = state.playId

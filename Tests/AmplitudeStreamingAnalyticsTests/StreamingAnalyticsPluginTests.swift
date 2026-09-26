@@ -91,7 +91,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         // The plumbing: whatever the observer accrued reaches the wire. The total is the same whether or
         // not a pulse sampled the advance first, so this does not depend on timing; the pulse itself is
         // covered against a controllable seam in PlayerObserverTests.
-        XCTAssertEqual(stopped.eventProperties?["stream_duration"] as? TimeInterval, 30)
+        XCTAssertEqual(stopped.eventProperties?["play_time"] as? TimeInterval, 30)
         XCTAssertEqual(final.ttlMs, 0, "no live snapshot left, so the row is finalized")
     }
 
@@ -142,7 +142,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         let sampled = expectation(description: "the tick's advance reached the wire")
         ownUploader.whenUploadArrives(matching: { body in
             body.events.contains { $0.eventType == StreamingEvents.stoppedType
-                && ($0.eventProperties?["stream_duration"] as? TimeInterval ?? 0) == 30 }
+                && ($0.eventProperties?["play_time"] as? TimeInterval ?? 0) == 30 }
         }, notify: { sampled.fulfill() })
 
         player.position = 30

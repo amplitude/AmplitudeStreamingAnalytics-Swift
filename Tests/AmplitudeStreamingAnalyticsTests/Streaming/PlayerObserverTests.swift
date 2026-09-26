@@ -14,7 +14,7 @@ final class PlayerObserverTests: XCTestCase {
         XCTAssertEqual(harness.phases, [.playing])
         XCTAssertEqual(harness.last?.position, 10)
         XCTAssertEqual(harness.last?.duration, 100)
-        XCTAssertEqual(harness.last?.watchTime, 0)
+        XCTAssertEqual(harness.last?.playTime, 0)
     }
 
     func testSignalsThatDoNotFitThePhaseAreIgnoredAndLogged() {
@@ -31,7 +31,7 @@ final class PlayerObserverTests: XCTestCase {
         XCTAssertEqual(harness.logger.messages(at: .debug).count, 2, "the two dropped events, not the idle tick")
     }
 
-    func testPauseClosesThePlayWithItsWatchTime() {
+    func testPauseClosesThePlayWithItsPlayTime() {
         let harness = PlayerObserverHarness(label: "pause")
         harness.handle(.played)
         harness.play(30)
@@ -39,10 +39,10 @@ final class PlayerObserverTests: XCTestCase {
 
         XCTAssertEqual(harness.phases, [.playing, .stopped(.paused)])
         XCTAssertEqual(harness.last?.position, 30)
-        XCTAssertEqual(harness.last?.watchTime, 30)
+        XCTAssertEqual(harness.last?.playTime, 30)
     }
 
-    func testEndedThenPlayedIsAReplayAndWatchTimeIsCumulative() {
+    func testEndedThenPlayedIsAReplayAndPlayTimeIsCumulative() {
         let harness = PlayerObserverHarness(label: "replay")
         harness.handle(.played)
         harness.play(100)
@@ -53,7 +53,7 @@ final class PlayerObserverTests: XCTestCase {
         harness.handle(.paused)
 
         XCTAssertEqual(harness.phases, [.playing, .stopped(.ended), .playing, .stopped(.paused)])
-        XCTAssertEqual(harness.last?.watchTime, 120)
+        XCTAssertEqual(harness.last?.playTime, 120)
     }
 
     // MARK: - accrual
@@ -69,10 +69,10 @@ final class PlayerObserverTests: XCTestCase {
         XCTAssertEqual(harness.states.count, 11)
         XCTAssertEqual(harness.last?.phase, .playing)
         XCTAssertEqual(harness.last?.position, 50)
-        XCTAssertEqual(harness.last?.watchTime, 50)
+        XCTAssertEqual(harness.last?.playTime, 50)
     }
 
-    /// `.seeked` alone keeps watch time correct; `.seeking` makes it exact, because its reading predates the jump
+    /// `.seeked` alone keeps play time correct; `.seeking` makes it exact, because its reading predates the jump
     /// and so recovers the half second played since the last pulse. Same viewing, same jump, both ways.
     func testSeekingRecoversThePlayBetweenTheLastPulseAndTheJump() {
         for (name, sendsSeeking, expected) in [("seeked only", false, 7.0), ("seeking first", true, 7.5)] {
@@ -87,7 +87,7 @@ final class PlayerObserverTests: XCTestCase {
             harness.play(2)
             harness.refresh()
 
-            XCTAssertEqual(harness.last?.watchTime, expected, "\(name)")
+            XCTAssertEqual(harness.last?.playTime, expected, "\(name)")
             XCTAssertEqual(harness.last?.position, 62, "\(name)")
             XCTAssertEqual(harness.phases, Array(repeating: .playing, count: harness.states.count),
                            "\(name): a seek never moves the phase")
@@ -109,12 +109,12 @@ final class PlayerObserverTests: XCTestCase {
         harness.play(2)
         harness.refresh()
 
-        XCTAssertEqual(harness.last?.watchTime, 7, "neither jump is watch time")
+        XCTAssertEqual(harness.last?.playTime, 7, "neither jump is play time")
         XCTAssertEqual(harness.last?.position, 92)
         // A repeat is free, not dropped: it publishes its re-based position so a consumer does not go stale
-        // mid-scrub. Only the accrual is suppressed, which the watch time above pins.
+        // mid-scrub. Only the accrual is suppressed, which the play time above pins.
         XCTAssertEqual(harness.states.map(\.position), [0, 5, 5, 60, 90, 92])
-        XCTAssertEqual(harness.states.map(\.watchTime), [0, 5, 5, 5, 5, 7])
+        XCTAssertEqual(harness.states.map(\.playTime), [0, 5, 5, 5, 5, 7])
     }
 
     /// The pulse books nothing mid-seek and does not end the seek; only an event does.
@@ -127,17 +127,17 @@ final class PlayerObserverTests: XCTestCase {
         harness.player.position = 60
         harness.refresh()
 
-        XCTAssertEqual(harness.last?.watchTime, 5, "the tick does not book the jump")
+        XCTAssertEqual(harness.last?.playTime, 5, "the tick does not book the jump")
         XCTAssertEqual(harness.last?.position, 60, "but it does move position")
 
         harness.player.position = 70
         harness.refresh()
-        XCTAssertEqual(harness.last?.watchTime, 5, "still seeking: a later tick books nothing either")
+        XCTAssertEqual(harness.last?.playTime, 5, "still seeking: a later tick books nothing either")
 
         harness.handle(.seeked)
         harness.play(2)
         harness.refresh()
-        XCTAssertEqual(harness.last?.watchTime, 7, "the seek ended and accrual resumed")
+        XCTAssertEqual(harness.last?.playTime, 7, "the seek ended and accrual resumed")
     }
 
     /// A seek before the first play publishes nothing — there is no play to re-base — and the play that
@@ -156,7 +156,7 @@ final class PlayerObserverTests: XCTestCase {
 
         XCTAssertEqual(harness.phases, [.playing, .playing])
         XCTAssertEqual(harness.last?.position, 62)
-        XCTAssertEqual(harness.last?.watchTime, 2, "the 60s jump before the play is not watch time")
+        XCTAssertEqual(harness.last?.playTime, 2, "the 60s jump before the play is not play time")
     }
 
     /// Any event ends the seek, so an unmatched `.seeking` cannot stall accrual past the next thing the player says.
@@ -169,13 +169,13 @@ final class PlayerObserverTests: XCTestCase {
         harness.player.position = 60
         harness.handle(.paused)                       // lands before `.seeked` ever does
 
-        XCTAssertEqual(harness.last?.watchTime, 5, "the jump is not watch time")
+        XCTAssertEqual(harness.last?.playTime, 5, "the jump is not play time")
         XCTAssertEqual(harness.last?.position, 60)
 
         harness.handle(.played)
         harness.play(3)
         harness.refresh()
-        XCTAssertEqual(harness.last?.watchTime, 8, "the pause ended the seek; accrual resumed")
+        XCTAssertEqual(harness.last?.playTime, 8, "the pause ended the seek; accrual resumed")
     }
 
     func testSeekedWhileStoppedRebasesWithoutBooking() {
@@ -191,7 +191,7 @@ final class PlayerObserverTests: XCTestCase {
         harness.refresh()
 
         XCTAssertEqual(harness.phases, [.playing, .playing, .stopped(.paused), .stopped(.paused), .playing, .playing])
-        XCTAssertEqual(harness.last?.watchTime, 8, "5 before the seek, 3 after; the jump is not watched")
+        XCTAssertEqual(harness.last?.playTime, 8, "5 before the seek, 3 after; the jump is not watched")
     }
 
     func testPauseAfterASeekClosesAtTheRebasedPosition() {
@@ -205,21 +205,21 @@ final class PlayerObserverTests: XCTestCase {
 
         XCTAssertEqual(harness.phases, [.playing, .playing, .playing, .stopped(.paused)])
         XCTAssertEqual(harness.last?.position, 60)
-        XCTAssertEqual(harness.last?.watchTime, 5, "the jump is not booked by the seek or by the pause after it")
+        XCTAssertEqual(harness.last?.playTime, 5, "the jump is not booked by the seek or by the pause after it")
     }
 
-    func testBackwardsMovementIsNotWatchTime() {
+    func testBackwardsMovementIsNotPlayTime() {
         let harness = PlayerObserverHarness(label: "backwards")
         harness.handle(.played)
         harness.play(5)
         harness.refresh()
         harness.player.position = 2
         harness.refresh()
-        XCTAssertEqual(harness.last?.watchTime, 5)
+        XCTAssertEqual(harness.last?.playTime, 5)
 
         harness.play(3)
         harness.refresh()
-        XCTAssertEqual(harness.last?.watchTime, 8, "accrual resumes from the new position")
+        XCTAssertEqual(harness.last?.playTime, 8, "accrual resumes from the new position")
     }
 
     // MARK: - errors
@@ -231,7 +231,7 @@ final class PlayerObserverTests: XCTestCase {
         harness.handle(.error(message: "boom"))
 
         XCTAssertEqual(harness.phases, [.playing, .stopped(.error(message: "boom")), .final])
-        XCTAssertEqual(harness.states[1].watchTime, 20)
+        XCTAssertEqual(harness.states[1].playTime, 20)
         XCTAssertEqual(harness.player.stopObservingCount, 1)
         XCTAssertNil(harness.player.onEvent)
         XCTAssertEqual(harness.logger.messages(at: .error).count, 1)
@@ -259,7 +259,7 @@ final class PlayerObserverTests: XCTestCase {
 
         XCTAssertEqual(harness.phases, [.playing, .stopped(.paused), .final],
                        "the pause stands as the play's reason; the error only ends the viewing")
-        XCTAssertEqual(harness.last?.watchTime, 5)
+        XCTAssertEqual(harness.last?.playTime, 5)
         XCTAssertEqual(harness.logger.messages(at: .error).count, 1)
         XCTAssertTrue(harness.logger.messages(at: .error)[0].contains("no message"))
     }
@@ -275,7 +275,7 @@ final class PlayerObserverTests: XCTestCase {
         harness.player.position = .nan
         harness.refresh()
         XCTAssertEqual(harness.last?.position, 5, "the last good position stands")
-        XCTAssertEqual(harness.last?.watchTime, 5)
+        XCTAssertEqual(harness.last?.playTime, 5)
 
         harness.player.position = -1
         harness.player.duration = .infinity
@@ -286,7 +286,7 @@ final class PlayerObserverTests: XCTestCase {
         harness.player.position = 10
         harness.player.duration = 100
         harness.refresh()
-        XCTAssertEqual(harness.last?.watchTime, 10, "accrual picks up from the last good reading")
+        XCTAssertEqual(harness.last?.playTime, 10, "accrual picks up from the last good reading")
         XCTAssertEqual(harness.last?.duration, 100)
 
         XCTAssertEqual(harness.logger.messages(at: .error).count, 3, "one report per bad reading")
@@ -304,12 +304,12 @@ final class PlayerObserverTests: XCTestCase {
 
         XCTAssertEqual(harness.phases, [.playing, .playing, .stopped(.untracked), .final])
         XCTAssertEqual(harness.states[2].position, 40)
-        XCTAssertEqual(harness.states[2].watchTime, 40, "playback since the last reading is not recovered")
+        XCTAssertEqual(harness.states[2].playTime, 40, "playback since the last reading is not recovered")
         XCTAssertEqual(harness.player.stopObservingCount, 1)
     }
 
     /// The contract asks a released player to answer from its cache, but cannot enforce it. Nothing is read from
-    /// a player that has said it is gone, so whatever it would have answered cannot reach watch time.
+    /// a player that has said it is gone, so whatever it would have answered cannot reach play time.
     func testAReleasedPlayerIsNeverRead() {
         let harness = PlayerObserverHarness(label: "released-garbage")
         harness.handle(.played)
@@ -319,7 +319,7 @@ final class PlayerObserverTests: XCTestCase {
         harness.handle(.released)
 
         XCTAssertEqual(harness.states[2].position, 40, "closed at the last reading taken while it was alive")
-        XCTAssertEqual(harness.states[2].watchTime, 40)
+        XCTAssertEqual(harness.states[2].playTime, 40)
         XCTAssertEqual(harness.last?.phase, .final)
     }
 
@@ -358,7 +358,7 @@ final class PlayerObserverTests: XCTestCase {
         }
         harness.drain()
 
-        XCTAssertGreaterThan(harness.last?.watchTime ?? 0, 0, "the pulse booked watch time on its own")
+        XCTAssertGreaterThan(harness.last?.playTime ?? 0, 0, "the pulse booked play time on its own")
     }
 
     func testThePulseStopsWhenPlaybackStops() {
