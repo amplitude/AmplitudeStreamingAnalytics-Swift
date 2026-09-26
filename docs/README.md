@@ -1,13 +1,13 @@
 # AmplitudeStreamingAnalytics-Swift docs
 
-> **Alpha.** This SDK is ready to use in production, but nothing in it is final. The public API, the internal behaviour, and the events it sends can all change before GA.
+> **Alpha.** Nothing in this SDK is final. The public API, the internal behaviour, and the events it sends can change in any release.
 
 > **Note:** Scope
 >
-> These pages describe the Alpha. They will be removed at GA, when [the Amplitude docsite](https://amplitude.com/docs) takes over.
+> These pages describe the Alpha.
 
-**Package:** AmplitudeStreamingAnalytics
-**Latest version:** unreleased; install by commit SHA
+**Module:** AmplitudeStreamingAnalytics
+**Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
 
 Reference for the Alpha of Amplitude's Streaming Analytics SDK for Apple platforms. Installation
 is in the [root README](../README.md).

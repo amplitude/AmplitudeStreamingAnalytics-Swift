@@ -1,13 +1,13 @@
 # Configuration
 
-> **Alpha.** This SDK is ready to use in production, but nothing in it is final. The public API, the internal behaviour, and the events it sends can all change before GA.
+> **Alpha.** Nothing in this SDK is final. The public API, the internal behaviour, and the events it sends can change in any release.
 
 > **Note:** Scope
 >
-> These pages describe the Alpha. They will be removed at GA, when [the Amplitude docsite](https://amplitude.com/docs) takes over.
+> These pages describe the Alpha.
 
-**Package:** AmplitudeStreamingAnalytics
-**Latest version:** unreleased; install by commit SHA
+**Module:** AmplitudeStreamingAnalytics
+**Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
 
 `PlayerContent` describes the content you are tracking. Pass it to `trackPlayer(player:content:)`
 when you start a viewing. See [Getting started](getting-started.md).
@@ -18,7 +18,7 @@ when you start a viewing. See [Getting started](getting-started.md).
 | --- | --- | --- | --- | --- |
 | `contentId` | `String?` | No | `nil` | Your identifier for the content. Sent as `content_id`. |
 | `title` | `String?` | No | `nil` | Human-readable title. Sent as `title`. |
-| `deliveryMode` | `DeliveryMode?` | No | `nil` | `.onDemand` or `.live`. When `nil`, the SDK infers it from whether the item has a duration. |
+| `deliveryMode` | `DeliveryMode?` | No | `nil` | `.onDemand` or `.live`. When `nil`, the SDK infers it on each event: `live` while the item's duration is unknown, `on_demand` once it is known. An on-demand item whose duration has not loaded yet is sent as `live`. |
 | `extraEventProperties` | `[String: Any]` | No | `[:]` | Extra properties added to every event this viewing sends. |
 
 ```swift
