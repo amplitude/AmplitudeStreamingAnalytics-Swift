@@ -7,7 +7,7 @@
 > These pages describe the Alpha.
 
 **Package:** AmplitudeStreamingAnalytics
-**Latest version:** unreleased; install by commit SHA
+**Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
 
 The SDK sends two events: `[Amplitude] Stream Started` and `[Amplitude] Stream Stopped`.
 
