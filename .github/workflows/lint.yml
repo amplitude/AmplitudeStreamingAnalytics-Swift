@@ -2,16 +2,13 @@ name: Lint
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -33,3 +30,17 @@ jobs:
           if grep -rnE 'Player|Streaming' Sources/AmplitudeStreamingAnalytics/DelayedEvents/; then
             echo "DelayedEvents/ must not reference Player or Streaming types (extractability, design v3.1)"; exit 1
           fi
+      - name: Version constant matches the release manifest
+        run: |
+          # release-please tags from the manifest and rewrites the constant from the
+          # same number. Nothing else asserts they agree, and the tag is immutable
+          # once cut, so a drift here ships a version that does not exist.
+          manifest=$(python3 -c 'import json; print(json.load(open(".release-please-manifest.json"))["."])')
+          constant=$(sed -n 's/.*static let version = "\([^"]*\)".*/\1/p' \
+            Sources/AmplitudeStreamingAnalytics/StreamingAnalyticsInfo.swift)
+          test -n "$constant" || {
+            echo "no version constant found — the extra-files rewrite target moved"; exit 1
+          }
+          test "$manifest" = "$constant" || {
+            echo "manifest $manifest != StreamingAnalyticsInfo.version $constant"; exit 1
+          }

@@ -1,0 +1,71 @@
+# Release Please automates versioning, the changelog, GitHub Releases and tags.
+# Config: release-please-config.json | Manifest: .release-please-manifest.json
+#
+# Swift Package Manager has no registry: consumers resolve straight from the git
+# tag this workflow creates, so tagging *is* publishing. There is no separate
+# publish job, and no CocoaPods push — this SDK ships no podspec.
+#
+# amplitude/actions/release-please-action reimplements release-please rather than
+# wrapping it. It supports no `bootstrap-sha` and no `Release-As` footer, and it
+# finds the commits to release by comparing against the tag for the manifest
+# version. That tag must exist: without it the action proposes nothing, which is
+# why the first release, v0.1.0-alpha.1, is tagged by hand (#50).
+#
+# Files carrying a version string are listed under `extra-files` and annotated
+# with `x-release-please-version`.
+#
+# === Graduating from alpha to stable 1.0.0 ===
+#
+# In one PR, remove "versioning", "prerelease" and "bump-minor-pre-major" from
+# release-please-config.json, and title it as a breaking change, e.g.
+# "feat(sdk)!: graduate to 1.0.0". Only a breaking change takes 0.x to 1.0.0; a
+# plain feat would release 0.2.0.
+
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Every write goes through the App token; GITHUB_TOKEN needs nothing.
+permissions: {}
+
+# Queue, never cancel: a run killed between the tag and the release leaves a
+# tag the ruleset will not let anyone move or delete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Test before tagging: once a tag exists, the ruleset won't let it move.
+  verify:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/unit-test.yml
+
+  release-please:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The App key lives in this environment, which only main can deploy to.
+    environment: release
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.SDK_RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.SDK_RELEASE_BOT_PRIVATE_KEY }}
+          # Labels go through the pull-requests grant; no issues access needed.
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: amplitude/actions/release-please-action@820754f06b23ec4138c65c07dae4131a46011020 # v0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
