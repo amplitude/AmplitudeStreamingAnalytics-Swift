@@ -21,11 +21,15 @@ struct UIKitPlayerScreen: UIViewControllerRepresentable {
 
 /// A plain UIKit screen with a play button. Tapping it presents an
 /// `AVPlayerViewController` modally, full-screen, and starts playback. The
-/// `AVPlayer` is owned by this controller and torn down once the player is
-/// dismissed.
+/// `AVPlayer` is owned by this controller and torn down once the viewing ends —
+/// which, with Picture in Picture, is later than the player being dismissed.
 final class UIKitPlayerViewController: UIViewController {
     var plugin: StreamingAnalyticsPlugin?
     private var player: AVPlayer?
+    /// Held across a Picture in Picture handover: the controller is dismissed while PiP runs
+    /// and re-presented if the viewer restores it, so nothing else keeps it alive.
+    private var playerViewController: DismissObservingPlayerViewController?
+    private var isPictureInPictureActive = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -68,15 +72,20 @@ final class UIKitPlayerViewController: UIViewController {
 
     @objc
     private func playTapped() {
-        let player = AVPlayer(url: DemoVideo.validURL)
+        let player = DemoVideo.makePlayer()
         self.player = player
 
         let playerViewController = DismissObservingPlayerViewController()
         playerViewController.player = player
+        playerViewController.delegate = self
+        playerViewController.allowsPictureInPicturePlayback = true
+        playerViewController.canStartPictureInPictureAutomaticallyFromInline = true
         playerViewController.modalPresentationStyle = .fullScreen
         playerViewController.onDismiss = { [weak self] in
-            self?.teardownPlayer()
+            guard let self, !isPictureInPictureActive else { return }
+            teardownPlayer()
         }
+        self.playerViewController = playerViewController
 
         plugin?.trackPlayer(
             player: player,
@@ -97,5 +106,31 @@ final class UIKitPlayerViewController: UIViewController {
         player.pause()
         plugin?.stopTracking(player: player)
         self.player = nil
+        playerViewController = nil
+    }
+}
+
+extension UIKitPlayerViewController: AVPlayerViewControllerDelegate {
+    func playerViewControllerWillStartPictureInPicture(_ controller: AVPlayerViewController) {
+        isPictureInPictureActive = true
+        // Give the screen back — the PiP window is the presentation now. The flag is set first
+        // so the dismissal this causes is not read as the end of the viewing.
+        controller.dismiss(animated: true)
+    }
+
+    func playerViewController(
+        _ controller: AVPlayerViewController,
+        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+    ) {
+        present(controller, animated: true) { completionHandler(true) }
+    }
+
+    func playerViewControllerDidStopPictureInPicture(_ controller: AVPlayerViewController) {
+        isPictureInPictureActive = false
+        // A restore re-presents before this fires, so no presenter means the viewer closed the
+        // PiP window outright and there is nothing left playing.
+        if controller.presentingViewController == nil {
+            teardownPlayer()
+        }
     }
 }
