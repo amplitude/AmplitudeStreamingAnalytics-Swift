@@ -33,7 +33,7 @@ final class StreamingAnalyticsIntegrationTests: XCTestCase {
 
         let final = expectation(description: "final")
         let carriesPausedFinal: (DelayedRequestBody) -> Bool = {
-            $0.instantEvents?.contains { $0.eventProperties?["stop_reason"] as? String == "paused" } == true
+            $0.instantEvents?.contains { $0.eventProperties?["[Streaming] Stop Reason"] as? String == "paused" } == true
         }
         uploader.whenUploadArrives(matching: carriesPausedFinal) { final.fulfill() }
         wait(for: [final], timeout: 5)
@@ -45,11 +45,11 @@ final class StreamingAnalyticsIntegrationTests: XCTestCase {
 
         XCTAssertNotNil(started.deviceId, "identity stamped by the timeline")
         XCTAssertNotNil(started.platform, "ContextPlugin enrichment reached the transport")
-        XCTAssertEqual(snapshot.eventProperties?["stop_reason"] as? String, "timeout")
+        XCTAssertEqual(snapshot.eventProperties?["[Streaming] Stop Reason"] as? String, "timeout")
         XCTAssertEqual(snapshot.insertId, stopped.insertId)
-        XCTAssertEqual(stopped.eventProperties?["percent_completed"] as? Double, 50)
-        XCTAssertEqual(stopped.eventProperties?["stream_session_id"] as? String,
-                       snapshot.eventProperties?["stream_session_id"] as? String)
+        XCTAssertEqual(stopped.eventProperties?["[Streaming] Percent Completed"] as? Double, 50)
+        XCTAssertEqual(stopped.eventProperties?["[Streaming] Stream Session ID"] as? String,
+                       snapshot.eventProperties?["[Streaming] Stream Session ID"] as? String)
         XCTAssertEqual(all.first?.ttlMs, DelayedEventsConfiguration().ttlMs)
         XCTAssertEqual(all.last?.ttlMs, 0)
         XCTAssertTrue(destination.seen.isEmpty, "video events never reach the normal destination")

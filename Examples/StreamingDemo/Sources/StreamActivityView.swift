@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Debug tab: a live list of the `[Amplitude] Stream *` events the plugin has emitted this run,
+// Debug tab: a live list of the `[Streaming] Stream *` events the plugin has emitted this run,
 // with a capture toggle. Request-level inspection is deferred to the Kong cross-SDK harness.
 struct StreamActivityView: View {
     @EnvironmentObject private var analytics: DemoAnalytics
