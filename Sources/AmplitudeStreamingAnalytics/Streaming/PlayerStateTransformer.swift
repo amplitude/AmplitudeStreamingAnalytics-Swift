@@ -9,8 +9,6 @@ final class PlayerStateTransformer {
         let startInsertId = UUID().uuidString
         let stopInsertId = UUID().uuidString
         let startPosition: TimeInterval
-        /// The session's play time when this play opened; what accrues past it is this play's own.
-        let playTimeAtStart: TimeInterval
     }
 
     private let streamSessionId = UUID().uuidString
@@ -28,7 +26,7 @@ final class PlayerStateTransformer {
         var start: DelayedEvent?
 
         if play == nil, state.phase == .playing {
-            let opened = Play(startPosition: state.position, playTimeAtStart: state.playTime)
+            let opened = Play(startPosition: state.position)
             self.play = opened
             start = self.start(opened, state, at: now)
         }
@@ -85,8 +83,8 @@ final class PlayerStateTransformer {
                        startPosition: play.startPosition,
                        position: state.position,
                        duration: state.duration,
-                       playTime: state.playTime - play.playTimeAtStart,
-                       playTimeTotal: state.playTime,
+                       playTime: state.playTime,
+                       playTimeTotal: state.playTimeTotal,
                        stopReason: stopReason,
                        errorMessage: errorMessage)
     }

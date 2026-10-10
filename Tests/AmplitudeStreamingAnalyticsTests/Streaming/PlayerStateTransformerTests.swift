@@ -15,14 +15,16 @@ final class PlayerStateTransformerTests: XCTestCase {
     private func state(_ phase: PlayerState.Phase,
                        position: TimeInterval = 0,
                        duration: TimeInterval? = 100,
-                       playTime: TimeInterval = 0) -> PlayerState {
-        PlayerState(phase: phase, position: position, duration: duration, playTime: playTime)
+                       playTime: TimeInterval = 0,
+                       playTimeTotal: TimeInterval = 0) -> PlayerState {
+        PlayerState(phase: phase, position: position, duration: duration, playTime: playTime, playTimeTotal: playTimeTotal)
     }
 
     private func emit(_ phase: PlayerState.Phase,
                       position: TimeInterval = 0,
-                      playTime: TimeInterval = 0) -> [DelayedEvent] {
-        transformer.events(for: state(phase, position: position, playTime: playTime), at: at)
+                      playTime: TimeInterval = 0,
+                      playTimeTotal: TimeInterval = 0) -> [DelayedEvent] {
+        transformer.events(for: state(phase, position: position, playTime: playTime, playTimeTotal: playTimeTotal), at: at)
     }
 
     private func string(_ name: String, _ event: DelayedEvent) -> String? { event.eventProperties?[name] as? String }
@@ -81,27 +83,15 @@ final class PlayerStateTransformerTests: XCTestCase {
 
     func testAReplayGetsANewPlayIdUnderTheSameStreamSession() {
         let first = emit(.playing)
-        _ = emit(.stopped(.ended), position: 100, playTime: 100)
-        let replay = emit(.playing, position: 0, playTime: 100)
+        _ = emit(.stopped(.ended), position: 100, playTime: 100, playTimeTotal: 100)
+        let replay = emit(.playing, position: 0, playTime: 0, playTimeTotal: 100)
 
         XCTAssertEqual(replay.count, 2)
         XCTAssertNotEqual(string("[Streaming] Play ID", replay[1]), string("[Streaming] Play ID", first[1]))
         XCTAssertNotEqual(replay[0].insertId, first[0].insertId, "a fresh pending stop")
         XCTAssertEqual(string("[Streaming] Stream Session ID", replay[1]), string("[Streaming] Stream Session ID", first[1]))
-        XCTAssertEqual(number("[Streaming] Play Time Sec", replay[0]), 0, "a new play starts from zero")
-        XCTAssertEqual(number("[Streaming] Play Time Total Sec", replay[0]), 100, "the session total carries on")
-    }
-
-    func testPlayTimeResetsPerPlayWhileTheTotalRunsOn() {
-        _ = emit(.playing)
-        let firstStop = emit(.stopped(.paused), position: 30, playTime: 30)
-        _ = emit(.playing, position: 30, playTime: 30)
-        let secondStop = emit(.stopped(.paused), position: 50, playTime: 50)
-
-        XCTAssertEqual(number("[Streaming] Play Time Sec", firstStop[0]), 30)
-        XCTAssertEqual(number("[Streaming] Play Time Total Sec", firstStop[0]), 30)
-        XCTAssertEqual(number("[Streaming] Play Time Sec", secondStop[0]), 20, "only what this play accrued")
-        XCTAssertEqual(number("[Streaming] Play Time Total Sec", secondStop[0]), 50)
+        XCTAssertEqual(number("[Streaming] Play Time Sec", replay[0]), 0)
+        XCTAssertEqual(number("[Streaming] Play Time Total Sec", replay[0]), 100)
     }
 
     func testNothingIsEmittedOutsideAPlay() {

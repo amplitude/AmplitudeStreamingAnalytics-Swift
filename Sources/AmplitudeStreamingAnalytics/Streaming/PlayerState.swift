@@ -20,6 +20,7 @@ struct PlayerState: Equatable {
     var position: TimeInterval = 0
     var duration: TimeInterval?
     var playTime: TimeInterval = 0
+    var playTimeTotal: TimeInterval = 0
 
     func with(_ change: (inout PlayerState) -> Void) -> PlayerState {
         var copy = self

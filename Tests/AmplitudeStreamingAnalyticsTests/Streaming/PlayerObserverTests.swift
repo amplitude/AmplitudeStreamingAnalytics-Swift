@@ -42,7 +42,7 @@ final class PlayerObserverTests: XCTestCase {
         XCTAssertEqual(harness.last?.playTime, 30)
     }
 
-    func testEndedThenPlayedIsAReplayAndPlayTimeIsCumulative() {
+    func testEndedThenPlayedIsAReplayAndOnlyTheTotalIsCumulative() {
         let harness = PlayerObserverHarness(label: "replay")
         harness.handle(.played)
         harness.play(100)
@@ -53,7 +53,25 @@ final class PlayerObserverTests: XCTestCase {
         harness.handle(.paused)
 
         XCTAssertEqual(harness.phases, [.playing, .stopped(.ended), .playing, .stopped(.paused)])
-        XCTAssertEqual(harness.last?.playTime, 120)
+        XCTAssertEqual(harness.last?.playTime, 20)
+        XCTAssertEqual(harness.last?.playTimeTotal, 120)
+    }
+
+    func testPlayTimeResetsPerPlayWhileTheTotalRunsOn() {
+        let harness = PlayerObserverHarness(label: "play-pause-play-pause")
+        harness.handle(.played)
+        harness.play(30)
+        harness.handle(.paused)
+        let firstStop = harness.last
+        harness.handle(.played)
+        harness.play(20)
+        harness.handle(.paused)
+
+        XCTAssertEqual(harness.phases, [.playing, .stopped(.paused), .playing, .stopped(.paused)])
+        XCTAssertEqual(firstStop?.playTime, 30)
+        XCTAssertEqual(firstStop?.playTimeTotal, 30)
+        XCTAssertEqual(harness.last?.playTime, 20, "only what this play accrued")
+        XCTAssertEqual(harness.last?.playTimeTotal, 50)
     }
 
     // MARK: - accrual
@@ -175,7 +193,8 @@ final class PlayerObserverTests: XCTestCase {
         harness.handle(.played)
         harness.play(3)
         harness.refresh()
-        XCTAssertEqual(harness.last?.playTime, 8, "the pause ended the seek; accrual resumed")
+        XCTAssertEqual(harness.last?.playTimeTotal, 8, "the pause ended the seek; accrual resumed")
+        XCTAssertEqual(harness.last?.playTime, 3, "the resume opened a new play")
     }
 
     func testSeekedWhileStoppedRebasesWithoutBooking() {
@@ -191,7 +210,8 @@ final class PlayerObserverTests: XCTestCase {
         harness.refresh()
 
         XCTAssertEqual(harness.phases, [.playing, .playing, .stopped(.paused), .stopped(.paused), .playing, .playing])
-        XCTAssertEqual(harness.last?.playTime, 8, "5 before the seek, 3 after; the jump is not watched")
+        XCTAssertEqual(harness.last?.playTimeTotal, 8, "5 before the seek, 3 after; the jump is not watched")
+        XCTAssertEqual(harness.last?.playTime, 3)
     }
 
     func testPauseAfterASeekClosesAtTheRebasedPosition() {
