@@ -50,7 +50,7 @@ final class StreamActivityLog: ObservableObject {
     }
 }
 
-// Demo-only hook: copies each `[Amplitude] Stream *` event into the activity log and passes it
+// Demo-only hook: copies each `[Streaming] Stream *` event into the activity log and passes it
 // through untouched. Request-level inspection is deferred to the Kong cross-SDK harness.
 private final class StreamActivityRecorder: BeforePlugin {
     private let log: StreamActivityLog
@@ -61,10 +61,10 @@ private final class StreamActivityRecorder: BeforePlugin {
     }
 
     override func execute(event: BaseEvent) -> BaseEvent? {
-        guard event.eventType.hasPrefix("[Amplitude] Stream") else { return event }
+        guard event.eventType.hasPrefix("[Streaming] Stream") else { return event }
         // A `timeout` stop is the once-a-second row the server holds open, not a viewing that ended.
         // Listing those buries every real event, so the panel shows only what a viewer did.
-        guard event.eventProperties?["stop_reason"] as? String != "timeout" else { return event }
+        guard event.eventProperties?["[Streaming] Stop Reason"] as? String != "timeout" else { return event }
 
         log.record(StreamActivityEntry(eventType: event.eventType, detail: summarize(event)))
         return event
@@ -73,11 +73,11 @@ private final class StreamActivityRecorder: BeforePlugin {
     private func summarize(_ event: BaseEvent) -> String {
         let props = event.eventProperties ?? [:]
         var parts: [String] = []
-        if let title = props["title"] as? String { parts.append(title) }
-        if let deliveryMode = props["delivery_mode"] as? String { parts.append(deliveryMode) }
-        if let duration = props["stream_duration"] as? Double { parts.append(String(format: "%.0fs", duration)) }
-        if let percent = props["percent_completed"] as? Double { parts.append(String(format: "%.0f%%", percent)) }
-        if let reason = props["stop_reason"] as? String { parts.append(reason) }
+        if let title = props["[Streaming] Title"] as? String { parts.append(title) }
+        if let deliveryMode = props["[Streaming] Delivery Mode"] as? String { parts.append(deliveryMode) }
+        if let duration = props["[Streaming] Play Time Sec"] as? Double { parts.append(String(format: "%.0fs", duration)) }
+        if let percent = props["[Streaming] Percent Completed"] as? Double { parts.append(String(format: "%.0f%%", percent)) }
+        if let reason = props["[Streaming] Stop Reason"] as? String { parts.append(reason) }
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }
 }

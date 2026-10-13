@@ -72,7 +72,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         waitForUpload { $0.instantEvents?.contains { $0.eventType == StreamingEvents.startedType } == true }
         waitForUpload { $0.events.contains { $0.eventType == StreamingEvents.stoppedType } }
         let snapshot = uploader.bodies.flatMap(\.events).first { $0.eventType == StreamingEvents.stoppedType }!
-        XCTAssertEqual(snapshot.eventProperties?["stop_reason"] as? String, "timeout")
+        XCTAssertEqual(snapshot.eventProperties?["[Streaming] Stop Reason"] as? String, "timeout")
         XCTAssertEqual(uploader.bodies.last?.ttlMs, 1_234)
     }
 
@@ -85,13 +85,13 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         player.position = 30
         player.fire(.paused)
 
-        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["stop_reason"] as? String == "paused" } == true }
+        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["[Streaming] Stop Reason"] as? String == "paused" } == true }
         let final = uploader.bodies.last!
         let stopped = final.instantEvents!.first { $0.eventType == StreamingEvents.stoppedType }!
         // The plumbing: whatever the observer accrued reaches the wire. The total is the same whether or
         // not a pulse sampled the advance first, so this does not depend on timing; the pulse itself is
         // covered against a controllable seam in PlayerObserverTests.
-        XCTAssertEqual(stopped.eventProperties?["stream_duration"] as? TimeInterval, 30)
+        XCTAssertEqual(stopped.eventProperties?["[Streaming] Play Time Sec"] as? TimeInterval, 30)
         XCTAssertEqual(final.ttlMs, 0, "no live snapshot left, so the row is finalized")
     }
 
@@ -142,7 +142,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         let sampled = expectation(description: "the tick's advance reached the wire")
         ownUploader.whenUploadArrives(matching: { body in
             body.events.contains { $0.eventType == StreamingEvents.stoppedType
-                && ($0.eventProperties?["stream_duration"] as? TimeInterval ?? 0) == 30 }
+                && ($0.eventProperties?["[Streaming] Play Time Sec"] as? TimeInterval ?? 0) == 30 }
         }, notify: { sampled.fulfill() })
 
         player.position = 30
@@ -193,7 +193,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
 
         plugin.stopTracking(player: player)
 
-        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["stop_reason"] as? String == "untracked" } == true }
+        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["[Streaming] Stop Reason"] as? String == "untracked" } == true }
         XCTAssertEqual(plugin.activeSessionCount, 0)
         XCTAssertEqual(player.stopObservingCount, 1, "the viewing stopped observing the player")
     }
@@ -216,7 +216,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         waitForUpload { !$0.events.isEmpty }
         first.fire(.released)
 
-        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["stop_reason"] as? String == "untracked" } == true }
+        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["[Streaming] Stop Reason"] as? String == "untracked" } == true }
         XCTAssertEqual(plugin.activeSessionCount, 1)
     }
 
@@ -228,7 +228,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
 
         player.fire(.released)
 
-        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["stop_reason"] as? String == "untracked" } == true }
+        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["[Streaming] Stop Reason"] as? String == "untracked" } == true }
         XCTAssertEqual(plugin.activeSessionCount, 0)
     }
 
@@ -313,7 +313,7 @@ final class StreamingAnalyticsPluginTests: XCTestCase {
         amplitude.remove(plugin: plugin)
         plugin = nil
 
-        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["stop_reason"] as? String == "untracked" } == true }
+        waitForUpload { $0.instantEvents?.contains { $0.eventProperties?["[Streaming] Stop Reason"] as? String == "untracked" } == true }
         XCTAssertEqual(player.stopObservingCount, 1)
     }
 

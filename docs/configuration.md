@@ -16,8 +16,8 @@ when you start a viewing. See [Getting started](getting-started.md).
 
 | Name | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `contentId` | `String?` | No | `nil` | Your identifier for the content. Sent as `content_id`. |
-| `title` | `String?` | No | `nil` | Human-readable title. Sent as `title`. |
+| `contentId` | `String?` | No | `nil` | Your identifier for the content. Sent as `[Streaming] Content ID`. |
+| `title` | `String?` | No | `nil` | Human-readable title. Sent as `[Streaming] Title`. |
 | `deliveryMode` | `DeliveryMode?` | No | `nil` | `.onDemand` or `.live`. When `nil`, the SDK infers it from whether the item has a duration. |
 | `extraEventProperties` | `[String: Any]` | No | `[:]` | Extra properties added to every event this viewing sends. |
 
@@ -38,36 +38,37 @@ If you use a key the SDK does not set on that event, your value goes through.
 
 Which keys the SDK sets depends on the event. See [Events](events.md) for what each one means.
 
-| Key | On `[Amplitude] Stream Started` | On `[Amplitude] Stream Stopped` |
+| Key | On `[Streaming] Stream Started` | On `[Streaming] Stream Stopped` |
 | --- | --- | --- |
-| `media_type` | always | always |
-| `delivery_mode` | always | always |
-| `stream_session_id` | always | always |
-| `play_id` | always | always |
-| `start_time` | always | always |
-| `position` | always | always |
-| `content_id` | when `PlayerContent.contentId` is set | same |
-| `title` | when `PlayerContent.title` is set | same |
-| `duration` | when the player knows the item's duration | same |
-| `stream_duration` | never | always |
-| `percent_completed` | never | when the player knows the item's duration |
-| `stop_reason` | never | always |
-| `error_message` | never | when the player reported an error message |
+| `[Streaming] Media Type` | always | always |
+| `[Streaming] Delivery Mode` | always | always |
+| `[Streaming] Stream Session ID` | always | always |
+| `[Streaming] Play ID` | always | always |
+| `[Streaming] Start Position Sec` | always | always |
+| `[Streaming] Position Sec` | always | always |
+| `[Streaming] Content ID` | when `PlayerContent.contentId` is set | same |
+| `[Streaming] Title` | when `PlayerContent.title` is set | same |
+| `[Streaming] Duration Sec` | when the player knows the item's duration | same |
+| `[Streaming] Play Time Sec` | never | always |
+| `[Streaming] Play Time Total Sec` | never | always |
+| `[Streaming] Percent Completed` | never | when the player knows the item's duration |
+| `[Streaming] Stop Reason` | never | always |
+| `[Streaming] Error Message` | never | when the player reported an error message |
 
 ```swift
 // contentId is nil, so the SDK sets nothing and your value survives as "x".
-let content = PlayerContent(extraEventProperties: ["content_id": "x"])
+let content = PlayerContent(extraEventProperties: ["[Streaming] Content ID": "x"])
 
 // contentId is set, so the event carries "y". The "z" is dropped.
-let overridden = PlayerContent(contentId: "y", extraEventProperties: ["content_id": "z"])
+let overridden = PlayerContent(contentId: "y", extraEventProperties: ["[Streaming] Content ID": "z"])
 ```
 
 Pick names for `extraEventProperties` that the table does not list at all. Two cases go wrong
 quietly:
 
-- A conditional key such as `content_id` lets your value through only while the SDK has no value
+- A conditional key such as `[Streaming] Content ID` lets your value through only while the SDK has no value
   of its own. The moment you set `contentId`, your property disappears from the data.
-- `stream_duration`, `percent_completed`, `stop_reason` and `error_message` reach every Started
+- The play-time keys, `[Streaming] Percent Completed`, `[Streaming] Stop Reason` and `[Streaming] Error Message` reach every Started
   event intact, because the SDK sets them only on Stopped events. The same key then means one
   thing on your Started events and another on your Stopped events, in the same viewing, with no
   error to tell you.
