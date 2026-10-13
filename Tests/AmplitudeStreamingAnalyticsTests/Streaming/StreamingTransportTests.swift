@@ -31,7 +31,7 @@ final class StreamingTransportTests: XCTestCase {
 
         let opening = uploader.bodies[0]
         let snapshotId = try XCTUnwrap(opening.events.first?.insertId)
-        let streamSessionId = opening.instantEvents?.first?.eventProperties?["stream_session_id"] as? String
+        let streamSessionId = opening.instantEvents?.first?.eventProperties?["[Streaming] Stream Session ID"] as? String
         XCTAssertEqual(opening.instantEvents?.map(\.eventType), [StreamingEvents.startedType])
         XCTAssertEqual((opening.instantEvents?.first as? DelayedEvent)?.forcePulse, true,
                        "the STARTED is forced, which is why it went out ahead of the pulse")
@@ -54,10 +54,10 @@ final class StreamingTransportTests: XCTestCase {
 
             let stopped = closing.instantEvents?.first
             XCTAssertEqual(stopped?.eventType, StreamingEvents.stoppedType)
-            XCTAssertEqual(stopped?.eventProperties?["stop_reason"] as? String, "paused")
-            XCTAssertEqual(stopped?.eventProperties?["play_time"] as? TimeInterval, 30)
-            XCTAssertEqual(stopped?.eventProperties?["position"] as? TimeInterval, 30)
-            XCTAssertEqual(stopped?.eventProperties?["stream_session_id"] as? String, streamSessionId)
+            XCTAssertEqual(stopped?.eventProperties?["[Streaming] Stop Reason"] as? String, "paused")
+            XCTAssertEqual(stopped?.eventProperties?["[Streaming] Play Time Sec"] as? TimeInterval, 30)
+            XCTAssertEqual(stopped?.eventProperties?["[Streaming] Position Sec"] as? TimeInterval, 30)
+            XCTAssertEqual(stopped?.eventProperties?["[Streaming] Stream Session ID"] as? String, streamSessionId)
 
             let reopened = bodies[index...].contains { $0.events.contains { $0.insertId == snapshotId } }
             XCTAssertFalse(reopened, "no request from the stop onwards leaves that row open again")

@@ -79,9 +79,9 @@ player.play()
 >
 > You can track one viewing per `AVPlayer` at a time. If you call `trackPlayer(player:content:)` on a player that is already tracked, the SDK logs an error and leaves the running viewing alone. To track a new video in the same player, call `stopTracking(player:)` first.
 
-> **Note:** `[Amplitude] Stream Started` fires when playback starts
+> **Note:** `[Streaming] Stream Started` fires when playback starts
 >
-> `trackPlayer(player:content:)` begins the viewing, but the first `[Amplitude] Stream Started` waits until the player actually starts playing. A viewing that pauses and resumes sends several Started events and several Stopped events. See [Events: Viewings and plays](events.md#viewings-and-plays).
+> `trackPlayer(player:content:)` begins the viewing, but the first `[Streaming] Stream Started` waits until the player actually starts playing. A viewing that pauses and resumes sends several Started events and several Stopped events. See [Events: Viewings and plays](events.md#viewings-and-plays).
 
 ### Stopping a viewing
 
@@ -91,7 +91,7 @@ Call `stopTracking(player:)` to end tracking for a player:
 streaming.stopTracking(player: player)
 ```
 
-If the player is playing, this sends a closing `[Amplitude] Stream Stopped`. If the player is
+If the player is playing, this sends a closing `[Streaming] Stream Stopped`. If the player is
 already paused, the SDK sent that event when the pause happened and sends nothing now.
 
 Calling `stopTracking(player:)` on a player you never tracked does nothing. It never touches
@@ -99,7 +99,7 @@ playback.
 
 > **Tip:** Tracking also ends on its own
 >
-> You do not have to call `stopTracking(player:)` when a screen goes away. The SDK holds the `AVPlayer` weakly and ends the viewing when the player deallocates, sending the same closing event an explicit `stopTracking(player:)` would, with `stop_reason` `untracked`. The SDK cannot read a player that is deallocating, so that event carries the position and watch time from its last reading, taken up to a second earlier.
+> You do not have to call `stopTracking(player:)` when a screen goes away. The SDK holds the `AVPlayer` weakly and ends the viewing when the player deallocates, sending the same closing event an explicit `stopTracking(player:)` would, with `[Streaming] Stop Reason` `untracked`. The SDK cannot read a player that is deallocating, so that event carries the position and play time from its last reading, taken up to a second earlier.
 
 ## Known limitations
 
@@ -109,6 +109,6 @@ playback.
   that item: no `ended`, no `error`, and forward seeks counted as play time.
 - The SDK does not follow `replaceCurrentItem`. The viewing keeps reporting under the
   `PlayerContent` you started it with, so the next video's events carry the previous video's
-  `content_id`. The item observers also stay on the first item, so the new item reports no
-  `ended` and no `error`, and forward seeks in it count as watched time. Call
+  `[Streaming] Content ID`. The item observers also stay on the first item, so the new item reports no
+  `ended` and no `error`, and forward seeks in it count as play time. Call
   `stopTracking(player:)`, then `trackPlayer(player:content:)` with the new content.
