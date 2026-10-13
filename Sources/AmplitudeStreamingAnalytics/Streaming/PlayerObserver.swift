@@ -77,7 +77,7 @@ final class PlayerObserver {
         isSeeking = event == .seeking
         switch event {
         case .played where state.phase != .playing:
-            commit(next.with { $0.phase = .playing })
+            commit(next.with { $0.phase = .playing; $0.playTime = 0 })
         case .paused where state.phase == .playing:
             commit(next.with { $0.phase = .stopped(.paused) })
         case .ended where state.phase == .playing:
@@ -126,7 +126,7 @@ final class PlayerObserver {
         let isPlayback = accruing && !isSeeking && state.phase == .playing
         let advance = isPlayback ? max(0, position - state.position) : 0
 
-        return state.with { $0.position = position; $0.duration = duration; $0.playTime += advance }
+        return state.with { $0.position = position; $0.duration = duration; $0.playTime += advance; $0.playTimeTotal += advance }
     }
 
     private func ignore(_ event: PlayerEvent) {

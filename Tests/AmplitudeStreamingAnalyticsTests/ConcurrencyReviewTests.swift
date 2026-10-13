@@ -51,7 +51,7 @@ final class DeinitFinalizationTests: XCTestCase {
 
 /// The closing event a viewing sends when it ends without the player saying why.
 func isUntrackedStop(_ body: DelayedRequestBody) -> Bool {
-    body.instantEvents?.contains { $0.eventProperties?["stop_reason"] as? String == "untracked" } == true
+    body.instantEvents?.contains { $0.eventProperties?["[Streaming] Stop Reason"] as? String == "untracked" } == true
 }
 
 // MARK: - Finding 2 (fixed): finish() safe from the serial queue
