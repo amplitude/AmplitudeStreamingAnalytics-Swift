@@ -5,6 +5,10 @@ import SwiftUI
 struct StreamingDemoApp: App {
     @StateObject private var analytics = DemoAnalytics()
 
+    init() {
+        DemoAudioSession.configureForBackgroundPlayback()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootTabView()
