@@ -6,7 +6,7 @@
 >
 > These pages describe the Alpha.
 
-**Package:** AmplitudeStreamingAnalytics
+**Module:** AmplitudeStreamingAnalytics
 **Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
 
 The SDK sends two events: `[Streaming] Stream Started` and `[Streaming] Stream Stopped`.
