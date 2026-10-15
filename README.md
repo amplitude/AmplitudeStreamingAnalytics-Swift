@@ -26,7 +26,6 @@ including, 2.0.0. Building needs Xcode 15+ (Swift 5.9), the package's `swift-too
 Swift Package Manager. Alpha releases can break the API from one to the next, so pin an exact
 version:
 
-<!-- x-release-please-start-version -->
 ```swift
 dependencies: [
     .package(url: "https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git", exact: "0.1.0-alpha.1")
@@ -38,7 +37,6 @@ targets: [
     )
 ]
 ```
-<!-- x-release-please-end -->
 
 ## Quickstart
 

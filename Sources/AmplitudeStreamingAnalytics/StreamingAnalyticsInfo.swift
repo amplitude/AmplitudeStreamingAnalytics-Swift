@@ -1,6 +1,6 @@
-/// Identifies this SDK on the events it sends. `version` is rewritten by release-please; the
-/// trailing marker is what it looks for, so do not edit either by hand.
+/// Identifies this SDK on the events it sends. `version` is rewritten by the release process,
+/// so do not edit it by hand.
 enum StreamingAnalyticsInfo {
     static let library = "streaming-analytics-swift"
-    static let version = "0.1.0-alpha.1" // x-release-please-version
+    static let version = "0.1.0-alpha.1"
 }

@@ -7,7 +7,7 @@
 > These pages describe the Alpha.
 
 **Module:** AmplitudeStreamingAnalytics
-**Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
+**Latest version:** 0.1.0-alpha.1
 
 `PlayerContent` describes the content you are tracking. Pass it to `trackPlayer(player:content:)`
 when you start a viewing. See [Getting started](getting-started.md).

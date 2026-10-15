@@ -7,7 +7,7 @@
 > These pages describe the Alpha.
 
 **Module:** AmplitudeStreamingAnalytics
-**Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
+**Latest version:** 0.1.0-alpha.1
 
 Reference for the Alpha of Amplitude's Streaming Analytics SDK for Apple platforms. Installation
 is in the [root README](../README.md).

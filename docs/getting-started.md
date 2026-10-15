@@ -7,7 +7,7 @@
 > These pages describe the Alpha.
 
 **Module:** AmplitudeStreamingAnalytics
-**Latest version:** 0.1.0-alpha.1 <!-- x-release-please-version -->
+**Latest version:** 0.1.0-alpha.1
 
 Amplitude Streaming Analytics reports what your users watch as Amplitude events.
 
@@ -26,7 +26,6 @@ You need:
 
 Alpha releases can break the API from one to the next, so pin an exact version:
 
-<!-- x-release-please-start-version -->
 ```swift
 dependencies: [
     .package(url: "https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git", exact: "0.1.0-alpha.1")
@@ -42,7 +41,6 @@ targets: [
 In Xcode, use **File > Add Package Dependencies…**, enter
 `https://github.com/amplitude/AmplitudeStreamingAnalytics-Swift.git`, choose **Exact Version**,
 enter `0.1.0-alpha.1`, and add the `AmplitudeStreamingAnalytics` library to your app target.
-<!-- x-release-please-end -->
 
 ### Configure your application code
 
