@@ -17,6 +17,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		DE304A0000000000000000C1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		30DA46E82D86B64795D658BF /* UIKitPlayerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIKitPlayerScreen.swift; sourceTree = "<group>"; };
 		DE304A0000000000000000A1 /* DemoAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoAnalytics.swift; sourceTree = "<group>"; };
 		DE304A0000000000000000B1 /* StreamActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamActivityView.swift; sourceTree = "<group>"; };
@@ -64,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				D2324695D874DBC2BDE07B19 /* Packages */,
+				DE304A0000000000000000C1 /* Info.plist */,
 				5C9FE01B621BD27DBC83AC9E /* Sources */,
 				6C049DA7D8452185B4C56CE0 /* Products */,
 			);
@@ -210,6 +212,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = StreamingDemo;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -293,6 +296,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = StreamingDemo;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
